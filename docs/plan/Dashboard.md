@@ -5,7 +5,7 @@
 ## 1. 进度快照
 
 - **核心阶段**：V0 集成面调研（🚧 开发中）
-- **当前瓶颈**：Agent / Workflow 与取消/恢复尚未实跑；cwd-sensitive Skill、Git worktree 私有状态和 QA 协议仍缺运行证据
+- **当前瓶颈**：Agent / Workflow keyless 生命周期、clean restart 与 SIGKILL repair 已实跑；cwd-sensitive Skill、Git worktree 私有状态、Tool pipeline 和 QA 协议仍缺运行证据
 - **首版目标**：完成 Audit → Finding Router → Auto Fix → Full Verification → QA → Final Reconciliation → Report 的可恢复编排闭环
 - **需求状态**：MVP 需求已整理；DSH 目标版本固定为 rc.8，fixture 工具链已验证，生产实现尚未开始
 
@@ -45,7 +45,7 @@
 
 ## 5. 当前缺口与起手任务
 
-1. **V0 — DSH 集成面调研**（🔴 前置，🚧 开发中）：目标固定为官方 `dsh-v0.1.0-rc.8`；Plugin / Command 生命周期、构建、lint、测试、打包和 profile 组合已有运行证据，其余公开面按源码证据与待实跑项分级记录在 [DSH_API_BASELINE](../integration/DSH_API_BASELINE.md)；下一步是 keyless Agent / Workflow、Skill/worktree 与恢复验证。
+1. **V0 — DSH 集成面调研**（🔴 前置，🚧 开发中）：目标固定为官方 `dsh-v0.1.0-rc.8`；Plugin、Command、Agent（含 SIGKILL repair）、Worker Workflow、构建、打包和 profile 组合已有运行证据，其余公开面按源码证据与待实跑项分级记录在 [DSH_API_BASELINE](../integration/DSH_API_BASELINE.md)；下一步是 Skill/worktree、Tool pipeline 与 QA 协议验证。
 2. **K1 — Plugin Skeleton 与状态基线**（🔴 P0）：只在 V0 形成可复现基线后启动。
 3. **K2 — Audit Orchestration 与 Router**（🔴 P0）：以实际 dev-harness Audit 产物进行最小集成验证。
 

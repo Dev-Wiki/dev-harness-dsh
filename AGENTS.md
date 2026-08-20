@@ -29,7 +29,7 @@
 - **语言/框架**: TypeScript ES modules，Cordis 4.0.1 Plugin，DeepSeek Harness 0.1.0-rc.8，Schemastery 3.18.1
 - **架构模式**: 产品需求、活动看板、任务详情与集成证据分层维护；可执行面隔离在 experiments/v0-minimal-plugin
 - **核心入口**: experiments/v0-minimal-plugin/src/index.ts 的 named Cordis plugin exports
-- **核心调用链**: DSH profile 读取 bundle patch → Cordis 调用 apply → ctx.effect 注册 harness-status → Human Command 执行并写入 command/run 与 command/done → fiber dispose 清理注册
+- **核心调用链**: V0 fixture 验证 rc.8 的 Plugin/Command、Agent create/cancel/clean resume、SIGKILL checkpoint repair 与 Worker Workflow 生命周期
 - **版本识别依据**: 目标版本 dsh-v0.1.0-rc.8 / commit 141eb6fef83422698aef7a981029e843e8161534；依赖图由 experiments/v0-minimal-plugin/pnpm-lock.yaml 固定
 
 ## 1b. 文件信任等级
@@ -80,7 +80,7 @@ Human Command 生命周期由 Session 的 command/run 与 command/done 记录；
 
 ## 10. 提问与探索建议
 
-先读 Dashboard 与 DSH_API_BASELINE，再沿 fixture 的 package.json → cordis.patch.yml → src/index.ts → smoke.mjs 探索；Agent/Workflow 结论回到 V0 剩余验证核对
+先读 Dashboard 与 DSH_API_BASELINE，再沿 package.json → smoke.mjs → agent-smoke.mjs → crash-smoke.mjs → workflow-smoke.mjs 探索；每条结论核对对应运行证据
 
 ## 11. 自动识别候选
 
@@ -93,7 +93,7 @@ Human Command 生命周期由 Session 的 command/run 与 command/done 记录；
 - `bugfix` 验证命令仍缺失，需人工补齐可信入口
 - build / test / quick / full 命令映射不完整，需人工确认最终入口
 - 生产 src、bugfix 与 full 命令尚不存在；fixture verify 不能冒充生产 harness:full
-- Agent、Workflow、Skill/worktree、跨重启恢复与 QA 协议仍缺运行证据
+- Skill/worktree、完整 Tool pipeline 与 QA 协议仍缺运行证据
 
 ## 13. 代码风格示例（仓库抽样）
 

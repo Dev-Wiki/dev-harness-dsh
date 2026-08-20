@@ -44,7 +44,7 @@
 - **Preconditions**: 同 build
 - **DeviceRequirement**: `none`
 - **Shell / Environment**: 项目兼容 shell；无 LLM/API 凭据要求
-- **Evidence**: `experiments/v0-minimal-plugin/package.json:25`、`experiments/v0-minimal-plugin/smoke.mjs`；2026-08-20 smoke 5/5 PASS
+- **Evidence**: `experiments/v0-minimal-plugin/package.json:25`、`smoke.mjs`、`agent-smoke.mjs`、`workflow-smoke.mjs`、`crash-smoke.mjs`；2026-08-20 Plugin/Command 5/5、Agent 3/3、Workflow 3/3、SIGKILL repair 1/1 PASS
 - **Status**: `confirmed`
 
 ### V0 fixture quick
@@ -80,4 +80,4 @@
 - `bugfix` 验证命令仍缺失，需人工补齐可信入口
 - build / test / quick / full 命令映射不完整，需人工确认最终入口
 - 生产 src、bugfix 与 full 命令尚不存在；fixture verify 不能冒充生产 harness:full
-- Agent、Workflow、Skill/worktree、跨重启恢复与 QA 协议仍缺运行证据
+- Skill/worktree、完整 Tool pipeline 与 QA 协议仍缺运行证据

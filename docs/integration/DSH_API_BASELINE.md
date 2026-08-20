@@ -60,23 +60,29 @@
 
 ### 3.4 Agent 创建、恢复与取消（`ctx.agents`）
 
-**结论：📚 源码已确认；真实 factory/persistence 路径尚未实跑。**
+**结论：✅ keyless factory、取消、清洁重启恢复和卸载已运行验证。**
 
 - `ctx.agents.create(options)` 和 `ctx.agents.resume(options)` 返回 owner 持有的 `AgentHandle { agent, dispose() }`。
 - 创建依赖已注册的 agent factory；resume 还依赖 `sessionPersistence`。失败会回滚未发布的 session/agent。
 - `Agent.cancel(cause, { keepInbox? })` 取消当前活动；`whenIdle()` 等待整个 agent 回到静止；handle `dispose()` 负责停止、等待、注销与 scope unwind。
 - `setup(agentCtx, agent)` 是发布前组合 agent-scoped 工具、prompt、listener 和插件的公开 seam。
+- fixture 仅在公开 `LlmAdapter` 边界注册内存 scripted adapter，不加载真实 provider、凭据或网络；正式 `AgentRegistry`、`AgentLoop`、Session、SystemPrompt 与 ToolRuntime 均参与运行。
+- create 场景已验证 `running → idle`、完整 turn、assistant message，以及 handle dispose 后 Agent 与 Session 同时注销；cancel 场景已验证 AbortSignal 传播与 durable `turn/end { kind: 'aborted' }`。
+- JSONL 场景在显式 flush 后销毁整个 Context，再用同一持久化根目录调用 `resume()`；已验证 `session/end-seed`、连续 seq 和 turn `1 → 2`。
+- 硬崩溃场景在独立、无环境变量的子进程挂载 Session Checkpoint Policy，于 adapter 收到请求后发送 `SIGKILL`；新 Context 的 `resume()` 已验证 repair 合成 `step/end` 与 `turn/end { kind: 'interrupted' }`，随后从 turn 2 连续执行。
 
 官方证据：[Core / Agent](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.1.0-rc.8/docs/subsystems/core.md)、[`dsh-agent` 实现](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.1.0-rc.8/packages/core/agent/src/index.ts)。
 
 ### 3.5 Workflow（`ctx.workflowEngine`）
 
-**结论：📚 源码已确认；worker-thread provider 尚未实跑。**
+**结论：✅ worker-thread 完成、取消、事件配对和资源卸载已运行验证。**
 
 - `ctx.workflowEngine.start(request)` 返回 `WorkflowRun`；`request.parent` 必填，`signal` 可取消。
 - `WorkflowRun.result` 始终 resolve，结果以 `completed | cancelled | error` 区分；caller 可 `cancel()`，且必须 `dispose()`。
 - 观察事件为 `workflow/start|phase|log|agent-start|agent-end|end`。
-- 该 seam 面向“模型生成脚本调度子 Agent”。本项目的固定状态机是否应直接使用它，仍需与 `ctx.agents.create/resume` 做最小运行比较，不能仅因名称相似就选用。
+- fixture 用正式 `SubagentRuntime`、内存 provider 和 `WorkerThreadWorkflowEngine` 实跑真实 Worker：完成路径严格配对 start/phase/log/agent-start/agent-end/end，取消路径把 child signal 置为 aborted 并产生 `agent-end: cancelled`。
+- `WorkflowRun.dispose()` 后已观察到 Worker `exit` 且 `threadId === -1`；holder plugin 返回 run disposer 时，holder fiber 卸载会等待 worker 清理，而只卸载 engine service 不应被当作已返回 run 的所有权清理。
+- 该 seam 面向“模型生成脚本调度子 Agent”。运行证据证明它可用，但本项目的固定产品状态机仍应由 Plugin 自己持久化；Workflow 更适合受控的动态子任务，不应取代 K1 状态契约。
 
 官方证据：[Workflow 子系统](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.1.0-rc.8/docs/subsystems/workflow.md)、[`dsh-workflow` 实现](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.1.0-rc.8/packages/workflow/workflow/src/index.ts)。
 
@@ -119,6 +125,9 @@ NPM_CONFIG_CACHE="$(mktemp -d)" npm run verify
 - Oxlint：PASS；
 - TypeScript build：PASS；
 - Plugin / Human Command smoke：5/5 PASS；
+- keyless Agent create / cancel / JSONL clean restart：3/3 PASS；
+- Worker Workflow complete / cancel / holder dispose：3/3 PASS；
+- Agent SIGKILL checkpoint repair / resume：1/1 PASS（Windows 明确跳过）；
 - `npm pack --dry-run`：PASS，tarball 只包含 README、bundle patch、编译产物和 package manifest。
 
 ### 4.2 rc.8 Profile 组合
@@ -144,10 +153,9 @@ DSH_HOME=<isolated-dir> node_modules/.bin/dsh --profile headless --dump-config
 
 V0 尚未完成，K1 不启动。剩余项：
 
-1. 用 rc.8 官方 mock LLM / session persistence 组合实跑 `ctx.agents.create()`、`resume()`、`cancel()`、`whenIdle()` 和 handle disposal，不使用真实 API key 作为唯一验证路径。
-2. 实跑 worker-thread `ctx.workflowEngine.start()` 的完成、取消、dispose 和事件配对，并比较它是否适合固定产品状态机。
-3. 建立临时 Git worktree，验证 cwd-sensitive Skill lookup、Git private path 解析、跨进程原子写和漂移 fail-closed。
-4. 确认外部 QA Skill 的发现、授权、输入与完成状态协议；无法确认则保留 manual fallback。
-5. `HARNESS.md` 已由 Context / Commands 工作流生成并确认 fixture 的 build/test/quick；生产 `bugfix` / `full` 仍明确为 `Missing`，等待 K1 建立真实工程后补齐。
+1. 建立临时 Git worktree，验证 cwd-sensitive Skill lookup、Git private path 解析、跨进程原子写和漂移 fail-closed。
+2. 实跑完整 Tool pipeline，核对 live `tools/*` 与 durable `tool/*` 的配对和取消边界。
+3. 确认外部 QA Skill 的发现、授权、输入与完成状态协议；无法确认则保留 manual fallback。
+4. `HARNESS.md` 已由 Context / Commands 工作流生成并确认 fixture 的 build/test/quick；生产 `bugfix` / `full` 仍明确为 `Missing`，等待 K1 建立真实工程后补齐。
 
 任何一项只有类型声明而无运行证据时，必须继续标为源码已确认，不得写成“DSH 已支持且本项目可用”。

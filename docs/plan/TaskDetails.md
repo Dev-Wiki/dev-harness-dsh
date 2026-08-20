@@ -9,7 +9,7 @@
 
 - **优先级**：🔴 P0
 - **状态**：🚧 开发中
-- **估时**：完成 keyless Agent / Workflow、Skill/worktree 与恢复验证后评估
+- **估时**：完成 Skill/worktree、Tool pipeline 与 QA 协议验证后评估
 - **依赖**：可读取的目标 DSH 版本源码、官方 reference、最小运行环境
 
 **背景**：原始规划包含 Plugin、Skill Registry、Human Command、Agent / Workflow 与 Tool Event 的具体 API 假设。本仓库尚无证据证明这些接口名称、生命周期和稳定性，不能直接进入实现。
@@ -25,7 +25,7 @@
 **调研产出**：
 
 - Create: `docs/integration/DSH_API_BASELINE.md` — 已验证 API、版本、证据和限制（✅ 已建）；
-- Create: 最小实验或测试 fixture — 证明入口与生命周期行为（✅ `experiments/v0-minimal-plugin`，rc.8 smoke 5/5 通过）；
+- Create: 最小实验或测试 fixture — 证明入口与生命周期行为（✅ `experiments/v0-minimal-plugin`，Plugin/Command 5/5、Agent 3/3、Workflow 3/3、SIGKILL repair 1/1 通过）；
 - Modify: `docs/product/REQUIREMENTS.md` — 把已证实项目从“待确认”移入对应需求，保留证据链接（✅ 已更新）；
 - Modify: `HARNESS.md` — 由 Context / Commands 工作流记录真实验证命令（✅ 已确认 fixture build/test/quick；生产 bugfix/full 明确为 Missing）。
 
@@ -42,9 +42,9 @@
 **当前进展（2026-08-20）**：
 
 - 已固定官方版本基线：`@deepseek-ai/dsh` `0.1.0-rc.8`、Git tag `dsh-v0.1.0-rc.8`、commit `141eb6f...`、Cordis `4.0.1`；本机全局 rc.6 仅作对照。
-- 已运行验证：Cordis plugin named exports、bundle/profile 装配、`ctx.commands` 注册/执行/事件/卸载，以及 TypeScript build/typecheck、Oxlint、smoke 和 pack dry-run。
-- 已按官方 rc.8 源码确认但尚未实跑：`ctx.skills`、`ctx.agents.create/resume`、`ctx.workflowEngine.start`、Tool pipeline、Session persistence、Workspace、Approval 与 atomic-write。
-- 剩余：keyless Agent / Workflow 与取消/恢复、cwd-sensitive Skill、Git worktree 私有状态和外部 QA 协议；生产 bugfix/full 在 K1 工程建立后补齐。
+- 已运行验证：Cordis plugin named exports、bundle/profile 装配、`ctx.commands` 注册/执行/事件/卸载；keyless Agent create/cancel/whenIdle/dispose、JSONL clean restart 与 SIGKILL checkpoint repair/resume；Worker Workflow complete/cancel/event pairing/holder dispose；以及 TypeScript build/typecheck、Oxlint、smoke 和 pack dry-run。
+- 已按官方 rc.8 源码确认但尚未实跑：`ctx.skills` cwd 行为、完整 Tool pipeline、Workspace、Approval 与 atomic-write。
+- 剩余：cwd-sensitive Skill、Git worktree 私有状态、Tool pipeline 和外部 QA 协议；生产 bugfix/full 在 K1 工程建立后补齐。
 
 ---
 
