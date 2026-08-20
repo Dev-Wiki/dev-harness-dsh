@@ -71,6 +71,19 @@ DeepSeek Harness TypeScript Plugin 项目；Task V0、K1、K2、K3、K4、S1、S
 - **Evidence**: `experiments/v0-minimal-plugin/package.json:23`；2026-08-20 本机执行 PASS
 - **Status**: `confirmed`
 
+### Local release package
+
+- **Purpose**: `package`
+- **Command**: `python3 release.py`
+- **WorkingDirectory**: repository root
+- **Platform / Variant**: Python 3.10+、Node.js 22.19+ / production Plugin
+- **Preconditions**: 已执行 `pnpm install --frozen-lockfile --ignore-scripts`
+- **DeviceRequirement**: `none`
+- **Shell / Environment**: 项目兼容 shell；无凭据要求；使用可写 npm cache
+- **Output**: `dist/dev-harness-dsh-<version>.tgz`；只生成本地包，不执行 registry publish、Git tag、push 或 release
+- **Evidence**: `release.py`；2026-08-20 本机执行 canonical full PASS，并生成、校验 38 个文件的 `dev-harness-dsh-0.1.0.tgz`
+- **Status**: `confirmed`
+
 ## 高风险目录
 - src — 生产编排、Git 状态持久化与恢复停止线
 - experiments/v0-minimal-plugin — 依赖、bundle 装配与 Cordis 生命周期实验

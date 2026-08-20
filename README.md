@@ -20,4 +20,15 @@ npm / package.json, pnpm
 ## 使用说明
 - 安装: pnpm install --frozen-lockfile --ignore-scripts
 - 构建: npm run harness:build
+- 本地发布包: python3 release.py（先执行完整验证，再生成 `dist/*.tgz`；不上传 registry）
 - 运行: N/A
+
+## 构建本地发布包
+
+```shell
+python3 release.py
+```
+
+脚本先执行 `npm run harness:full`，成功后用禁用生命周期脚本的 `npm pack` 在临时目录构建并校验包名、版本、关键文件、条目数、大小和 SHA-256，最后将包放入 `dist/`。同名包默认不会被覆盖；确认替换时使用 `python3 release.py --force`，自定义目录时使用 `--output-dir <path>`。
+
+该脚本只构建本地 `.tgz`，不会执行 npm registry publish、Git tag、push 或外部 release。
