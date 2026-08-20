@@ -9,6 +9,7 @@ import type { AuditAdapter } from './audit.js'
 
 export * from './commands.js'
 export * from './audit.js'
+export * from './autofix.js'
 export * from './router.js'
 export * from './orchestrator.js'
 export * from './skills.js'
