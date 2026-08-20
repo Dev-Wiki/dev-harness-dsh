@@ -110,7 +110,7 @@
 - fixture 通过 `git rev-parse --absolute-git-dir` 解析每个 worktree 的 private Git dir；linked worktree 状态落在主仓 `.git/worktrees/<name>/dev-harness/dsh/<run-id>/state.json`，不使用 worktree 根的 `.git` 文件或 common dir。
 - 8 个独立进程使用 `withFileLock()` 包围 read-modify-write，并以 `writeFileAtomic()` 提交；最终 revision 与 writer 集合无丢失，持续并发读取始终为完整 JSON，且没有残留 lock/temp sibling，POSIX 权限为 `0600`。
 - 恢复基线同时固定 canonical worktree、private Git dir、HEAD、clean/dirty fingerprint、lockfile SHA-256 与实际解析包版本；worktree、tracked edit、HEAD、lockfile或包版本漂移均 fail closed，失败前后状态字节不变。
-- K1 仍必须把这些已验证原语落实为生产 Run State，并保存运行级授权；`writeFileAtomic()` 不承诺 fsync crash durability，现存 orphan lock 也必须由操作员处理而非自动删除。
+- K1 已把这些原语落实为生产 Run State、revision CAS 与恢复校验；运行级提交授权仍由 K4 建立。`writeFileAtomic()` 不承诺 fsync crash durability，现存 orphan lock 也必须由操作员处理而非自动删除。
 
 官方证据：[Workspace](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.1.0-rc.8/docs/subsystems/workspace.md)、[Approval](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.1.0-rc.8/docs/subsystems/approval.md)、[Atomic write](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.1.0-rc.8/packages/util/atomic-write/README.md)。
 
@@ -159,6 +159,6 @@ DSH_HOME=<isolated-dir> node_modules/.bin/dsh --profile headless --dump-config
 
 ## 5. V0 决策与下游停止线
 
-V0 的生产实现前置证据已完成，K1 可以启动。外部 QA Skill 不作为 V0 的硬依赖：当前环境没有已验证的稳定 QA Skill 输入、授权与完成状态协议，因此 S2 必须按产品选择顺序重新发现能力；在验证出更高优先级 Adapter 前，唯一可声明可用的兜底是生成手工检查清单，且不得把 `MANUAL_REQUIRED` 冒充 `PASS`。
+V0 的生产实现前置证据与 K1 状态/命令基线均已完成，K2 可以在稳定 seam 上启动。外部 QA Skill 不作为 V0 的硬依赖：当前环境没有已验证的稳定 QA Skill 输入、授权与完成状态协议，因此 S2 必须按产品选择顺序重新发现能力；在验证出更高优先级 Adapter 前，唯一可声明可用的兜底是生成手工检查清单，且不得把 `MANUAL_REQUIRED` 冒充 `PASS`。
 
-生产 `bugfix` / `full` 仍为 `Missing`，fixture 的 `verify` 不能冒充生产 `harness:full`。K1 建立生产工程后必须补齐生产级 build/test/quick；S1 只能消费届时已确认的 full 入口。任何只有类型声明而无运行证据的能力必须继续标为源码已确认，不得写成“本项目可用”。
+生产 `harness:build` / `test` / `quick` / `bugfix` / `full` 已由 K1 建立并通过本机运行验证；fixture `verify` 仍不得冒充生产 `harness:full`。S1 只消费该已确认 full 入口，并负责持久化结果与失败传播。任何只有类型声明而无运行证据的能力必须继续标为源码已确认，不得写成“本项目可用”。

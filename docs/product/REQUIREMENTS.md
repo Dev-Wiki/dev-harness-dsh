@@ -1,6 +1,6 @@
 # dev-harness-dsh MVP 需求
 
-> 状态：MVP 生产实现尚未开始；Task V0 集成基线已完成。
+> 状态：MVP 生产实现进行中；Task V0 与 K1 已完成，Task K2 开发中。
 >
 > 文档职责：本文是 MVP 产品需求、职责边界和验收口径的权威文档；活动状态与执行步骤分别由 [`Dashboard.md`](../plan/Dashboard.md) 和 [`TaskDetails.md`](../plan/TaskDetails.md) 维护。
 >
@@ -344,11 +344,13 @@ Plugin 不直接修改 `<docs-root>/audit/Findings.md`；resolved、remaining、
 - Tool Event 使用 durable `tool/call`、`tool/result` 及 live `tools/pre-execute|execute|post-execute|result|change`；fixture 已实跑成功、结构化错误、执行中取消、分发前取消与 JSONL replay 配对；
 - 会话 clean restart 已验证 append-only 事件、`session/end-seed`、连续 seq 与 turn 续号；独立子进程 SIGKILL 后也已验证 checkpoint repair 合成 interrupted turn 并从下一 turn 恢复；
 - `ctx.workspaceRegistry` 不是 Plugin 私有状态存储；`ctx.approval` 的 `ask` / `never` 也不能替代 `fix-only` / `commit-each` 运行级授权；
-- Git private dir、跨进程原子写和 worktree/HEAD/依赖漂移拒绝已在真实 linked worktree fixture 实跑；K1 负责将该基线实现为生产 Run State；
+- Git private dir、跨进程原子写和 worktree/HEAD/依赖漂移拒绝已在真实 linked worktree fixture 实跑，并已由 K1 落实为生产 Run State；
+- K1 已建立生产 `run` / `resume` / `status` Human Command、不可移除的核心 Skill preflight、状态机、revision CAS 与取消边界；catalog 不完整、依赖缺失、状态损坏或恢复漂移均 fail closed；
+- 生产 build / test / quick / bugfix / full 脚本已建立并通过本机验证；S1 仍负责把 `harness:full` 纳入编排状态与失败传播；
 - 当前没有已验证的外部 QA Skill 协议；S2 在发现并验证更高优先级 Adapter 前必须使用 manual checklist fallback，结果不得标为 PASS；
 - fixture 的 TypeScript typecheck/build、Oxlint、测试、pack dry-run 和 rc.8 profile 组合已运行通过。
 
 ### 后续任务仍须确认
 
 - 外部 QA Skill 的发现、授权、输入和完成状态协议（S2；验证前使用 manual fallback）；
-- 生产项目级 build / test / quick / bugfix / full 命令；fixture 命令不能冒充生产 `harness:full`。
+- Audit Skill 的可执行 Adapter、权威 Finding Registry 和 handoff 输入契约（K2）。

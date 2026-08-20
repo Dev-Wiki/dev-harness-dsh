@@ -4,24 +4,36 @@
 它定义可执行命令、运行条件和验证边界，不替代 `AGENTS.md` 中的行为、安全与修改约束。
 
 ## 项目类型
-DeepSeek Harness TypeScript Plugin 项目；Task V0 集成实验已完成，Task K1 开发中，生产 src 尚未建立
+DeepSeek Harness TypeScript Plugin 项目；Task V0 与 K1 已完成，Task K2 Audit Orchestration 开发中
 
 ## 编译与启动问题排查
 - **WorkingDirectory**: repository root
 - **RecommendedTerminal**: PowerShell（Windows）或项目兼容 shell
-- **CanRunBuildHere**: unknown
-- **BuildCommand**: `npm --prefix experiments/v0-minimal-plugin run build`
+- **CanRunBuildHere**: yes
+- **BuildCommand**: `npm run harness:build`
 - **FailureEvidence**: 记录完整命令、工作目录、终端类型、退出码、前 50 行和最后 100 行构建日志
 
 ## 自动识别构建命令候选
 
-- **build**: `npm --prefix experiments/v0-minimal-plugin run build`
-- **test**: `npm --prefix experiments/v0-minimal-plugin test`
-- **quick**: `npm --prefix experiments/v0-minimal-plugin run typecheck`
-- **bugfix**: `Unknown`
-- **full**: `Unknown`
+- **build**: `npm run harness:build`
+- **test**: `npm run harness:test`
+- **quick**: `npm run harness:quick`
+- **bugfix**: `npm run harness:bugfix`
+- **full**: `npm run harness:full`
 
 ## 已确认命令（人工维护）
+
+### Production build / test / quick / bugfix / full
+
+- **Purpose**: `build` / `test` / `quick` / `bugfix` / `full`
+- **Commands**: `npm run harness:build`、`npm run harness:test`、`npm run harness:quick`、`npm run harness:bugfix`、`npm run harness:full`
+- **WorkingDirectory**: repository root
+- **Platform / Variant**: Node.js 22.19+ / production Plugin
+- **Preconditions**: 已执行 `pnpm install --frozen-lockfile --ignore-scripts`
+- **DeviceRequirement**: `none`
+- **Shell / Environment**: 项目兼容 shell；无 LLM/API 凭据要求；pack dry-run 需要可写 npm cache
+- **Evidence**: `package.json:28-32`；2026-08-20 本机执行 `npm run harness:full`，typecheck、Oxlint、12 tests 与 pack dry-run PASS
+- **Status**: `confirmed`
 
 ### V0 fixture build
 
@@ -59,12 +71,8 @@ DeepSeek Harness TypeScript Plugin 项目；Task V0 集成实验已完成，Task
 - **Evidence**: `experiments/v0-minimal-plugin/package.json:23`；2026-08-20 本机执行 PASS
 - **Status**: `confirmed`
 
-### 尚缺入口
-
-- **bugfix**: `Missing` — 生产源码与回归套件尚未建立。
-- **full**: `Missing` — fixture `verify` 不得冒充生产 `harness:full`。
-
 ## 高风险目录
+- src — 生产编排、Git 状态持久化与恢复停止线
 - experiments/v0-minimal-plugin — 依赖、bundle 装配与 Cordis 生命周期实验
 - docs/integration — 生产实现可依赖的 DSH 事实边界
 
@@ -72,12 +80,12 @@ DeepSeek Harness TypeScript Plugin 项目；Task V0 集成实验已完成，Task
 - .git: version control metadata
 
 ## 自动识别候选
-- build: npm --prefix experiments/v0-minimal-plugin run build
-- test: npm --prefix experiments/v0-minimal-plugin test
-- quick: npm --prefix experiments/v0-minimal-plugin run typecheck
+- build: npm run harness:build
+- test: npm run harness:test
+- quick: npm run harness:quick
+- bugfix: npm run harness:bugfix
+- full: npm run harness:full
 
 ## 需人工确认
-- `bugfix` 验证命令仍缺失，需人工补齐可信入口
-- build / test / quick / full 命令映射不完整，需人工确认最终入口
-- 生产 src、bugfix 与 full 命令尚不存在；fixture verify 不能冒充生产 harness:full
+- K2 尚需固定 Audit Skill 的可执行 Adapter、权威 Finding Registry 与 handoff 输入契约
 - 外部 QA Skill 协议尚未验证；S2 在验证 Adapter 前只声明 manual checklist fallback

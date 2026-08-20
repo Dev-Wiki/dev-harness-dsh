@@ -2,7 +2,7 @@
 
 > 本文档是 [Dashboard.md](Dashboard.md) 的执行层补充。产品边界与验收口径以 [MVP 需求](../product/REQUIREMENTS.md) 为准。
 >
-> **当前主题**：dev-harness-dsh MVP。Task V0 已完成，Task K1 开发中；其他任务未经实现和验证证据不得标记完成。
+> **当前主题**：dev-harness-dsh MVP。Task V0 与 K1 已完成，Task K2 开发中；其他任务未经实现和验证证据不得标记完成。
 
 <a id="task-v0"></a>
 ## 0. 前置调研：DSH 集成面与工具链基线（Task V0）
@@ -27,7 +27,7 @@
 - Create: `docs/integration/DSH_API_BASELINE.md` — 已验证 API、版本、证据和限制（✅ 已建）；
 - Create: 最小实验或测试 fixture — 证明入口与生命周期行为（✅ `experiments/v0-minimal-plugin`，Plugin/Command 5/5、Agent 3/3、Workflow 3/3、Tool pipeline 1/1、worktree/state 3/3、SIGKILL repair 1/1 通过）；
 - Modify: `docs/product/REQUIREMENTS.md` — 把已证实项目从“待确认”移入对应需求，保留证据链接（✅ 已更新）；
-- Modify: `HARNESS.md` — 由 Context / Commands 工作流记录真实验证命令（✅ 已确认 fixture build/test/quick；生产 bugfix/full 明确为 Missing）。
+- Modify: `HARNESS.md` — 由 Context / Commands 工作流记录真实验证命令（✅ V0 确认 fixture build/test/quick；K1 后续补齐生产 build/test/quick/bugfix/full）。
 
 **Steps:**
 
@@ -44,7 +44,7 @@
 - 已固定官方版本基线：`@deepseek-ai/dsh` `0.1.0-rc.8`、Git tag `dsh-v0.1.0-rc.8`、commit `141eb6f...`、Cordis `4.0.1`；本机全局 rc.6 仅作对照。
 - 已运行验证：Cordis plugin named exports、bundle/profile 装配、`ctx.commands` 注册/执行/事件/卸载；keyless Agent create/cancel/whenIdle/dispose、JSONL clean restart 与 SIGKILL checkpoint repair/resume；Worker Workflow complete/cancel/event pairing/holder dispose；cwd-sensitive Skill 与 linked worktree 隔离；Tool live/durable pipeline；Git private state、8 进程 atomic-write 和恢复漂移拒绝；以及 TypeScript build/typecheck、Oxlint、smoke 和 pack dry-run。
 - QA 决策：当前没有已验证的外部 QA Skill 协议，S2 在发现并验证 Adapter 前保留 manual checklist fallback，无法自动执行不得报告 PASS。
-- 下游边界：Workspace 与 Approval 仍仅有源码级证据，但不阻塞 K1；生产 bugfix/full 在生产工程建立后补齐，fixture verify 不冒充生产 full。
+- 下游边界：Workspace 与 Approval 仍仅有源码级证据；K1 已补齐生产 bugfix/full，fixture verify 仍不冒充生产 full。
 
 ---
 
@@ -54,8 +54,8 @@
 ### Task K1：Plugin Skeleton 与状态基线
 
 - **优先级**：🔴 P0
-- **状态**：🚧 开发中
-- **估时**：实现与验证后评估
+- **状态**：✅ 已完成
+- **估时**：已完成（2026-08-20）
 - **依赖**：Task V0
 
 **背景**：MVP 需要一个不复制 dev-harness 语义的最小 Plugin 入口、依赖检查、Human Command 和可恢复状态层。
@@ -83,13 +83,20 @@
 4. 增加缺失依赖、损坏状态、重复 Run 和取消场景测试。
 5. 使用 V0 基线命令执行完整验证。
 
+**完成证据（2026-08-20）**：
+
+- 生产 Cordis Plugin、精确 rc.8 依赖与 `harness:build/test/quick/bugfix/full` 入口已建立；
+- `src/state.ts` 实现 Git private dir 状态、`0600` atomic write、跨进程锁、revision CAS、阶段迁移及 worktree/HEAD/依赖/内容漂移拒绝；
+- `/harness-run`、`/harness-resume`、`/harness-status` 直接通过 CommandRuntime 执行，不开启模型 turn；四个核心 Skill 不可被配置移除，catalog 不完整或缺失时在创建状态前 fail closed；
+- 自动化覆盖损坏/符号链接状态、linked worktree 隔离、并发更新、重复 Run、暂停恢复、取消、预中止和 fiber 卸载；生产 `npm run verify` 本机 PASS。
+
 ---
 
 <a id="task-k2"></a>
 ### Task K2：Audit Orchestration 与 Finding Router
 
 - **优先级**：🔴 P0
-- **状态**：📋 规划中
+- **状态**：🚧 开发中
 - **估时**：K1 完成后评估
 - **依赖**：Task K1；可运行的 `dev-harness-codebase-audit` 目标 fixture
 
@@ -322,4 +329,4 @@
 
 ---
 
-*最后更新：2026-08-20（Task V0 完成，Task K1 启动）*
+*最后更新：2026-08-20（Task K1 完成，Task K2 启动）*
