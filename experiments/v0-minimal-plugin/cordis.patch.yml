@@ -1,0 +1,8 @@
+# V0 fixture bundle patch: one insert over the dsh-base layer, addressing the
+# row by id so a profile's own patch layer can override it later (last write
+# wins per row).
+- insert:
+    - id: dev-harness-dsh
+      name: 'dev-harness-dsh-v0-fixture'
+      config:
+        probe: true
