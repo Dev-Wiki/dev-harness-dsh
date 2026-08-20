@@ -1,4 +1,4 @@
-import { QA_ADAPTER_KINDS, type QaAdapter, type QaAdapterKind } from './adapter.js'
+import { QA_ADAPTER_KINDS, assertQaAdapterEvidenceRef, type QaAdapter, type QaAdapterKind } from './adapter.js'
 
 const AUTO_PRIORITY: readonly QaAdapterKind[] = ['external-skill', 'native-agent', 'cli-api']
 
@@ -17,6 +17,7 @@ export function selectQaAdapter(adapters: readonly QaAdapter[], preferredName?: 
     if (typeof adapter.verificationEvidenceRef !== 'string' || adapter.verificationEvidenceRef.length === 0) {
       throw new TypeError(`QA Adapter ${adapter.name} has no verification evidence`)
     }
+    assertQaAdapterEvidenceRef(adapter.verificationEvidenceRef, { requireExistingFile: true })
     if (names.has(adapter.name)) throw new TypeError(`duplicate QA Adapter name: ${adapter.name}`)
     names.add(adapter.name)
   }

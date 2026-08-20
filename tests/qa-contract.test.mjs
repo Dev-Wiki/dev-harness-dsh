@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import test from 'node:test'
 
 import {
@@ -98,13 +102,21 @@ test('rejects false PASS, incomplete QaFinding, and terminal claims on RUNNING',
 test('selects explicit adapters first, then verified kind priority, else manual fallback', () => {
   const noop = {
     name: 'qa-native',
-    verificationEvidenceRef: 'qa:adapter-verification:fixture',
     async start() {},
     async resume() {},
   }
-  const native = defineNativeQaAdapter(noop)
-  const external = defineExternalSkillQaAdapter({ ...noop, name: 'qa-external' })
-  const cli = { ...noop, name: 'qa-cli', kind: 'cli-api', verified: true }
+  const native = defineNativeQaAdapter(noop, 'qa:adapter-verification:fixture')
+  const external = defineExternalSkillQaAdapter(
+    { ...noop, name: 'qa-external' },
+    'qa:adapter-verification:external',
+  )
+  const cli = {
+    ...noop,
+    name: 'qa-cli',
+    kind: 'cli-api',
+    verified: true,
+    verificationEvidenceRef: 'qa:adapter-verification:cli',
+  }
   assert.equal(selectQaAdapter([native, cli, external]).adapter.name, 'qa-external')
   assert.equal(selectQaAdapter([external, native], 'qa-native').source, 'user-specified')
   assert.equal(selectQaAdapter([external], 'missing').source, 'manual-fallback')
@@ -118,7 +130,39 @@ test('selects explicit adapters first, then verified kind priority, else manual 
     /no verification evidence/u,
   )
   assert.throws(
+    () => selectQaAdapter([{ ...cli, name: 'bad-evidence', verificationEvidenceRef: 'no-scheme' }]),
+    /URI reference/u,
+  )
+  assert.throws(
     () => validateQaObservation(observation({ adapterVerificationEvidenceRef: 'qa:changed' }), expected),
     /adapterVerificationEvidenceRef does not match/u,
   )
+})
+
+test('QA helpers require explicit evidence refs and file refs must exist', async () => {
+  const noop = {
+    name: 'qa-file',
+    async start() {},
+    async resume() {},
+  }
+  assert.throws(() => defineNativeQaAdapter(noop, ''), /non-empty string/u)
+  assert.throws(() => defineExternalSkillQaAdapter(noop, 'no-scheme'), /URI reference/u)
+
+  const scratch = await mkdtemp(join(tmpdir(), 'dev-harness-qa-evidence-'))
+  try {
+    const docs = join(scratch, 'docs')
+    await mkdir(docs, { recursive: true })
+    const evidencePath = join(docs, 'adapter-evidence.md')
+    await writeFile(evidencePath, '# adapter verification evidence\n')
+    const existing = pathToFileURL(evidencePath).href
+    assert.equal(selectQaAdapter([defineExternalSkillQaAdapter(noop, existing)]).source, 'automatic')
+
+    const missing = pathToFileURL(join(docs, 'missing.md')).href
+    assert.throws(
+      () => selectQaAdapter([defineNativeQaAdapter(noop, missing)]),
+      /does not exist/u,
+    )
+  } finally {
+    await rm(scratch, { recursive: true, force: true })
+  }
 })

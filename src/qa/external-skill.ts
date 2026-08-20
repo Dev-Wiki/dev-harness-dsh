@@ -1,7 +1,14 @@
-import type { QaAdapter } from './adapter.js'
+import { assertQaAdapterEvidenceRef, type QaAdapter } from './adapter.js'
 
 export function defineExternalSkillQaAdapter(
-  adapter: Omit<QaAdapter, 'kind' | 'verified'>,
+  adapter: Omit<QaAdapter, 'kind' | 'verified' | 'verificationEvidenceRef'>,
+  verificationEvidenceRef: string,
 ): QaAdapter {
-  return Object.freeze({ ...adapter, kind: 'external-skill', verified: true })
+  assertQaAdapterEvidenceRef(verificationEvidenceRef)
+  return Object.freeze({
+    ...adapter,
+    kind: 'external-skill',
+    verified: true,
+    verificationEvidenceRef,
+  })
 }

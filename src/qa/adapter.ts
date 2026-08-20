@@ -1,3 +1,6 @@
+import { existsSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
 export const QA_CONTRACT_VERSION = 1 as const
 export const QA_ADAPTER_KINDS = ['external-skill', 'native-agent', 'cli-api'] as const
 export type QaAdapterKind = typeof QA_ADAPTER_KINDS[number]
@@ -7,6 +10,40 @@ export type QaExecutionStatus = typeof QA_EXECUTION_STATUSES[number]
 
 export const QA_RESULT_STATUSES = ['PASS', 'FAIL', 'MANUAL_REQUIRED'] as const
 export type QaResultStatus = typeof QA_RESULT_STATUSES[number]
+
+const QA_EVIDENCE_REF_PATTERN = /^[a-z][a-z0-9+.-]*:[^\s]+$/u
+
+/**
+ * Validates a QA Adapter verification evidence reference.
+ *
+ * The reference must be a URI-form string (for example 'qa:...', 'https://...'
+ * or 'file:///...'). A 'file:' reference must resolve to an existing regular
+ * file when requireExistingFile is set, so 'verified' claims are at least
+ * anchored to a concrete artifact instead of an arbitrary string.
+ */
+export function assertQaAdapterEvidenceRef(
+  value: unknown,
+  options: { readonly requireExistingFile?: boolean } = {},
+): string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new TypeError('QA Adapter verification evidence reference must be a non-empty string')
+  }
+  if (!QA_EVIDENCE_REF_PATTERN.test(value)) {
+    throw new TypeError(`QA Adapter verification evidence reference must be a URI reference: ${value}`)
+  }
+  if (options.requireExistingFile === true && value.startsWith('file:')) {
+    let path: string
+    try {
+      path = fileURLToPath(value)
+    } catch {
+      throw new TypeError(`QA Adapter verification evidence reference is not a valid file URL: ${value}`)
+    }
+    if (!existsSync(path)) {
+      throw new TypeError(`QA Adapter verification evidence file does not exist: ${path}`)
+    }
+  }
+  return value
+}
 
 export const QA_SCENARIO_STATUSES = ['PASS', 'FAIL', 'MANUAL_REQUIRED', 'BLOCKED'] as const
 export type QaScenarioStatus = typeof QA_SCENARIO_STATUSES[number]

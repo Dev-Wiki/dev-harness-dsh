@@ -15,7 +15,7 @@ import {
 import type { AuditAdapter } from './audit.js'
 import type { AutoFixAdapter } from './autofix.js'
 import type { FullVerificationAdapter } from './verification.js'
-import type { QaAdapter } from './qa/index.js'
+import { assertQaAdapterEvidenceRef, type QaAdapter } from './qa/index.js'
 import type { FinalReconciliationAdapter } from './reconciliation.js'
 
 export * from './commands.js'
@@ -204,6 +204,7 @@ export class DevHarnessRuntime extends Service {
     if (typeof adapter.verificationEvidenceRef !== 'string' || adapter.verificationEvidenceRef.length === 0) {
       throw new TypeError(`QA Adapter ${adapter.name} has no verification evidence`)
     }
+    assertQaAdapterEvidenceRef(adapter.verificationEvidenceRef, { requireExistingFile: true })
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(adapter.name)) throw new TypeError('invalid QA Adapter name')
     if (this.qaAdapters.has(adapter.name)) throw new Error(`QA Adapter ${adapter.name} is already registered`)
     this.qaAdapters.set(adapter.name, adapter)

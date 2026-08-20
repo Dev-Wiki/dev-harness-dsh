@@ -46,6 +46,38 @@ test('core required Skills cannot be configured away', async () => {
   }
 })
 
+test('QA registration rejects invalid or non-existent evidence references', async () => {
+  const ctx = new Context()
+  await ctx.plugin(Commands)
+  await ctx.plugin(SkillRegistry)
+  const fiber = await ctx.plugin(Plugin)
+  const adapter = {
+    name: 'fixture-qa',
+    kind: 'cli-api',
+    verified: true,
+    verificationEvidenceRef: 'qa:adapter-verification:fixture',
+    async start() {},
+    async resume() {},
+  }
+  try {
+    assert.throws(
+      () => ctx.devHarness.registerQaAdapter({ ...adapter, name: 'bad-evidence', verificationEvidenceRef: 'no-scheme' }),
+      /URI reference/u,
+    )
+    assert.throws(
+      () => ctx.devHarness.registerQaAdapter({
+        ...adapter,
+        name: 'missing-file',
+        verificationEvidenceRef: 'file:///definitely/not/a/real/evidence.md',
+      }),
+      /does not exist/u,
+    )
+  } finally {
+    await fiber.dispose()
+    await ctx.fiber.dispose()
+  }
+})
+
 test('QA registration accepts only named verified Adapters and owns their lifecycle', async () => {
   const ctx = new Context()
   await ctx.plugin(Commands)
