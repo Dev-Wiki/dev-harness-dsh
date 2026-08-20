@@ -2,7 +2,7 @@
 
 > 本文档是 [Dashboard.md](Dashboard.md) 的执行层补充。产品边界与验收口径以 [MVP 需求](../product/REQUIREMENTS.md) 为准。
 >
-> **当前主题**：dev-harness-dsh MVP。Task V0、K1、K2、K3、K4、S1、S2 已完成，Task S3 开发中；其他任务未经实现和验证证据不得标记完成。
+> **当前主题**：dev-harness-dsh MVP。Task V0、K1、K2、K3、K4、S1、S2、S3 已完成，Task S4 开发中；其他任务未经实现和验证证据不得标记完成。
 
 <a id="task-v0"></a>
 ## 0. 前置调研：DSH 集成面与工具链基线（Task V0）
@@ -284,8 +284,8 @@
 ### Task S3：Final Audit Reconciliation
 
 - **优先级**：🟡 P1
-- **状态**：🚧 开发中
-- **估时**：S2 完成后评估
+- **状态**：✅ 已完成
+- **估时**：已完成（2026-08-20）
 - **依赖**：Task S2
 
 **目标**：
@@ -295,10 +295,19 @@
 - 读取 resolved、remaining、stale 等权威结果；
 - 不直接修改 Audit Registry。
 
-**预计文件**：
+**实现文件**：
 
 - Modify: `src/orchestrator.ts` — FINAL_RECONCILE 阶段；
 - Test: 原始 Finding 身份、仓库漂移、复核失败和 remaining 场景。
+
+**完成证据（2026-08-20）**：
+
+- `src/reconciliation.ts` 固定版本化 Final Reconciliation 请求/Observation，绑定初始 Audit run/snapshot、原始 Finding ID 精确集合、当前 HEAD/branch/workspace/Context 与不同的 fresh Snapshot；
+- COMPLETED 必须覆盖全部且仅覆盖原始 Finding，并从 Audit Registry 引用 resolved、remaining 或 rejected 证据；stale 不能冒充完成，RUNNING/BLOCKED/FAILED/CANCELLED 分别传播；
+- Run State schema v4 持久化稳定 reconciliation run、OPEN mutation lease、原始/fresh snapshot、Registry/Report、逐 Finding 终态与 evidence refs；RUNNING 可按原 run/ref/revision/snapshot 恢复；
+- Plugin 只允许 Adapter 修改 canonical `doc(s)/audit` 根，独立核对真实 Git output fingerprint 与 business dirty scope 后原子接纳新 baseline；Plugin 本身不写 Audit Registry；
+- Final Reconciliation 只在当前 Full Verification PASS、权威 QA PASS 且所有 QaFinding 已解决后启动；Adapter 写后崩溃可幂等 start，越界修改、workspace 漂移、缺失 QA PASS、复用初始 snapshot 或原始 Finding 缺失均 fail closed；
+- 59 个生产自动化用例及 `npm test` PASS。
 
 ---
 
@@ -306,7 +315,7 @@
 ### Task S4：统一 Run Summary
 
 - **优先级**：🟡 P1
-- **状态**：📋 规划中
+- **状态**：🚧 开发中
 - **估时**：S3 完成后评估
 - **依赖**：Task S3
 
@@ -372,4 +381,4 @@
 
 ---
 
-*最后更新：2026-08-20（Task S2 完成，Task S3 启动）*
+*最后更新：2026-08-20（Task S3 完成，Task S4 启动）*

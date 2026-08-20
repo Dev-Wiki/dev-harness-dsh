@@ -92,7 +92,7 @@ Human Command 生命周期由 Session 的 command/run 与 command/done 记录；
 
 ## 12. 需人工确认
 
-- S3 尚需固定 fresh Audit Snapshot、原始 Finding 身份与 reconciliation 终态接纳合同
+- S4 尚需固定统一 Run Summary、权威引用完整性与 Overall 状态归并合同
 - 外部 QA Skill 协议仍未验证；没有验证证据的 Adapter 不可注册，默认只生成 manual checklist 且不声明 PASS
 
 ## 13. 代码风格示例（仓库抽样）
