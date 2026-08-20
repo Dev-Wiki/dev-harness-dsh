@@ -2,6 +2,10 @@
 
 本目录是 `dev-harness-dsh` 唯一的项目文档根。MVP 编排基线已完成；需求、任务状态和实现证据仍分层维护。
 
+## 使用与安装
+
+- [安装与启用](how-to/INSTALL.md)：构建本地发布包、安装到 DSH profile、准备必需 Skills、验证、升级和卸载。
+
 ## 产品需求
 
 - [MVP 需求](product/REQUIREMENTS.md)：Plugin 定位、职责边界、工作流、集成假设和验收标准的权威文档。
@@ -21,5 +25,6 @@
 - `plan/Dashboard.md` 只维护状态和链接，不复制实施细节。
 - `plan/TaskDetails.md` 维护活动任务；未经实现或验证证据不得标记完成。
 - `integration/DSH_API_BASELINE.md` 维护 DSH 集成事实与验证边界，不承担任务状态汇总。
+- `how-to/INSTALL.md` 维护面向使用者的安装、启用和卸载步骤，不维护 DSH 底层 API 证据。
 - 外部 DSH API、SDK 和运行时行为在验证前只放在“待确认”范围，不写成当前事实。
 - 发布变化未来由 `CHANGELOG.md` 维护；本文档中心只提供入口。

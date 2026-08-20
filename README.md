@@ -18,9 +18,10 @@ npm / package.json, pnpm
 - experiments/v0-minimal-plugin — 可构建、可打包的 V0 Plugin/Command、Agent、Workflow、Tool、Skill/worktree 与状态边界实验
 
 ## 使用说明
-- 安装: pnpm install --frozen-lockfile --ignore-scripts
+- 开发依赖安装: pnpm install --frozen-lockfile --ignore-scripts
 - 构建: npm run harness:build
 - 本地发布包: python3 release.py（先执行完整验证，再生成 `dist/*.tgz`；不上传 registry）
+- 插件安装与启用: [安装指南](docs/how-to/INSTALL.md)
 - 运行: N/A
 
 ## 构建本地发布包
