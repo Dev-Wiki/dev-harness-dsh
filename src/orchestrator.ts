@@ -14,8 +14,16 @@ import {
   validateAutoFixObservation,
   type AutoFixAdapter,
   type AutoFixObservation,
+  type AutoFixSource,
 } from './autofix.js'
 import { autoFixExecutionMode } from './authorization.js'
+import {
+  QaContractError,
+  selectQaAdapter,
+  validateQaObservation,
+  type QaAdapter,
+  type QaObservation,
+} from './qa/index.js'
 import {
   FULL_VERIFICATION_COMMAND,
   FullVerificationContractError,
@@ -230,16 +238,7 @@ export async function advanceRemediationRun(options: {
   if (finding.handoffRef === undefined) {
     throw new OrchestratorError(`Auto Fix finding ${finding.findingId} has no handoff reference`)
   }
-  if (
-    state.auditRunId === undefined
-    || state.auditResult === undefined
-    || state.auditResult.status !== 'COMPLETED'
-    || state.auditResult.executionStatus !== 'COMPLETED'
-  ) {
-    throw new OrchestratorError('Remediation requires a completed Audit checkpoint')
-  }
-  const auditRunId = state.auditRunId
-  const auditResult = state.auditResult
+  const source = autoFixSource(state, finding.findingId, finding.handoffRef)
 
   const previousRun = state.fixRuns.find(run => run.findingId === finding.findingId)
   let before: WorktreeBoundary
@@ -263,6 +262,8 @@ export async function advanceRemediationRun(options: {
           beforeChangedPaths: { ...before.changedPaths },
           status: 'OPEN',
         }
+        const qaFinding = next.qa.findings.find(candidate => candidate.findingId === finding.findingId)
+        if (qaFinding !== undefined) qaFinding.status = 'IN_REMEDIATION'
       },
     })
   } else {
@@ -293,14 +294,7 @@ export async function advanceRemediationRun(options: {
     cwd: state.repo.worktreeRoot,
     orchestrationRunId: state.runId,
     autoFixRunId: lease.autoFixRunId,
-    source: {
-      kind: 'audit-finding' as const,
-      findingId: finding.findingId,
-      handoffRef: finding.handoffRef,
-      auditRunId,
-      auditSnapshotRef: auditResult.snapshotRef,
-      findingRegistryRef: auditResult.registryRef,
-    },
+    source,
     mode: autoFixExecutionMode(state.authorization),
     expectedHead: state.repo.head,
     expectedBranch: state.repo.branch,
@@ -419,7 +413,7 @@ export async function advanceFullVerification(options: {
     await validateResume(state, options.cwd)
     before = await captureWorktreeBoundary(options.cwd)
     const verificationRunId = state.fullVerification?.verificationRunId
-      ?? stableVerificationRunId(state.runId)
+      ?? stableVerificationRunId(state.runId, state.verificationCycle)
     const snapshotRef = state.fullVerification?.snapshotRef
       ?? stableVerificationSnapshot(state.repo.head, before.fingerprint)
     state = await updateRun({
@@ -527,8 +521,334 @@ export async function advanceFullVerification(options: {
   })
 }
 
-function stableVerificationRunId(orchestrationRunId: string): string {
-  return `verify-${createHash('sha256').update(orchestrationRunId).digest('hex').slice(0, 16)}`
+export async function advanceQaRun(options: {
+  readonly cwd: string
+  readonly runId: string
+  readonly adapters: readonly QaAdapter[]
+  readonly signal: AbortSignal
+}): Promise<RunState> {
+  throwIfAborted(options.signal)
+  let state = await loadRun(options.cwd, options.runId)
+  if (!['FULL_VERIFY', 'QA'].includes(state.phase)) {
+    throw new OrchestratorError(`QA cannot advance from phase ${state.phase}`)
+  }
+  const verification = state.fullVerification
+  if (
+    verification?.executionStatus !== 'COMPLETED'
+    || verification.status !== 'PASS'
+    || verification.workspaceFingerprint !== state.repo.worktreeFingerprint
+  ) {
+    throw new OrchestratorError('QA requires a current Full Verification PASS checkpoint')
+  }
+  const latestRun = state.qa.runs.find(run => run.attempt === state.qa.currentAttempt)
+  if (state.phase === 'QA' && latestRun?.resultStatus === 'PASS') return state
+  if (state.phase === 'QA' && latestRun?.resultStatus === 'MANUAL_REQUIRED') {
+    if (state.status === 'NEEDS_USER') return state
+    return await updateRun({
+      cwd: options.cwd,
+      runId: state.runId,
+      expectedRevision: state.revision,
+      mutate(next) {
+        next.status = 'NEEDS_USER'
+        next.blocker = { code: 'QA_MANUAL_REQUIRED', message: latestRun.evidenceRef! }
+      },
+    })
+  }
+  if (['PAUSED', 'BLOCKED', 'NEEDS_USER'].includes(state.status)) {
+    state = await updateRun({
+      cwd: options.cwd,
+      runId: state.runId,
+      expectedRevision: state.revision,
+      mutate(next) {
+        next.status = 'RUNNING'
+        delete next.blocker
+      },
+    })
+  }
+  if (['FAILED', 'CANCELLED', 'DONE', 'DONE_WITH_CONCERNS'].includes(state.status)) {
+    throw new OrchestratorError(`QA cannot advance a ${state.status} run`)
+  }
+
+  let before: WorktreeBoundary
+  if (state.qaLease === undefined) {
+    await validateResume(state, options.cwd)
+    before = await captureWorktreeBoundary(options.cwd)
+    const resumable = latestRun?.executionStatus === 'RUNNING' ? latestRun : undefined
+    const attempt = resumable?.attempt ?? state.qa.currentAttempt + 1
+    if (attempt > state.qa.maxAttempts) {
+      return await updateRun({
+        cwd: options.cwd,
+        runId: state.runId,
+        expectedRevision: state.revision,
+        mutate(next) {
+          next.phase = 'QA'
+          next.status = 'BLOCKED'
+          next.blocker = { code: 'QA_RETRY_EXHAUSTED', message: `QA exhausted ${next.qa.maxAttempts} attempts` }
+        },
+      })
+    }
+    const selection = resumable === undefined
+      ? selectQaAdapter(options.adapters, state.qaPreference)
+      : (() => {
+          const adapter = options.adapters.find(candidate => candidate.name === resumable.adapterName)
+          if (
+            adapter === undefined
+            || adapter.kind !== resumable.adapterKind
+            || adapter.verified !== true
+            || adapter.verificationEvidenceRef !== resumable.adapterVerificationEvidenceRef
+          ) {
+            throw new OrchestratorError('resumable QA Adapter is unavailable or changed')
+          }
+          return { adapter, source: 'automatic' as const, reason: 'resuming persisted QA Adapter' }
+        })()
+    if (selection.adapter === undefined) {
+      const qaRunId = stableQaRunId(state.runId, attempt, verification.snapshotRef, 'manual')
+      return await updateRun({
+        cwd: options.cwd,
+        runId: state.runId,
+        expectedRevision: state.revision,
+        mutate(next) {
+          next.phase = 'QA'
+          next.status = 'NEEDS_USER'
+          next.qa.currentAttempt = attempt
+          next.qa.runs.push({
+            qaRunId,
+            attempt,
+            adapterName: 'manual',
+            adapterKind: 'manual',
+            adapterVerificationEvidenceRef: 'qa:manual-contract:v1',
+            revision: 1,
+            executionStatus: 'COMPLETED',
+            resultStatus: 'MANUAL_REQUIRED',
+            runRef: `qa:manual:${qaRunId}`,
+            verificationRunId: verification.verificationRunId,
+            verificationSnapshotRef: verification.snapshotRef,
+            workspaceFingerprint: before.fingerprint,
+            evidenceRef: `qa:selection:${qaRunId}`,
+            manualChecklist: [...MANUAL_QA_CHECKLIST],
+          })
+          next.blocker = { code: 'QA_MANUAL_REQUIRED', message: selection.reason }
+        },
+      })
+    }
+    const qaRunId = resumable?.qaRunId
+      ?? stableQaRunId(state.runId, attempt, verification.snapshotRef, selection.adapter.name)
+    state = await updateRun({
+      cwd: options.cwd,
+      runId: state.runId,
+      expectedRevision: state.revision,
+      mutate(next) {
+        next.phase = 'QA'
+        next.qa.currentAttempt = attempt
+        next.qaLease = {
+          qaRunId,
+          attempt,
+          adapterName: selection.adapter!.name,
+          adapterKind: selection.adapter!.kind,
+          adapterVerificationEvidenceRef: selection.adapter!.verificationEvidenceRef,
+          verificationRunId: verification.verificationRunId,
+          verificationSnapshotRef: verification.snapshotRef,
+          beforeFingerprint: before.fingerprint,
+          beforeChangedPaths: { ...before.changedPaths },
+          status: 'OPEN',
+        }
+      },
+    })
+  } else {
+    before = {
+      worktreeRoot: state.repo.worktreeRoot,
+      fingerprint: state.qaLease.beforeFingerprint,
+      changedPaths: state.qaLease.beforeChangedPaths,
+    }
+    assertReadOnlyQaWorkspace(before, await captureWorktreeBoundary(options.cwd))
+  }
+
+  const lease = state.qaLease
+  if (lease === undefined) throw new OrchestratorError('QA lease was not persisted')
+  const adapter = options.adapters.find(candidate => candidate.name === lease.adapterName)
+  if (
+    adapter === undefined
+    || adapter.verified !== true
+    || adapter.kind !== lease.adapterKind
+    || adapter.verificationEvidenceRef !== lease.adapterVerificationEvidenceRef
+  ) {
+    throw new OrchestratorError('open QA lease Adapter is unavailable or changed')
+  }
+  const previous = state.qa.runs.find(run => run.attempt === lease.attempt)
+  const request = {
+    cwd: state.repo.worktreeRoot,
+    orchestrationRunId: state.runId,
+    qaRunId: lease.qaRunId,
+    attempt: lease.attempt,
+    verificationRunId: lease.verificationRunId,
+    verificationSnapshotRef: lease.verificationSnapshotRef,
+    expectedHead: state.repo.head,
+    expectedBranch: state.repo.branch,
+    expectedWorkspaceFingerprint: lease.beforeFingerprint,
+    signal: options.signal,
+  }
+  throwIfAborted(options.signal)
+  const rawObservation = previous === undefined
+    ? await adapter.start(request)
+    : await adapter.resume({ ...request, expectedRevision: previous.revision, expectedRunRef: previous.runRef })
+  throwIfAborted(options.signal)
+  const observation = validateQaObservation(rawObservation, {
+    runId: lease.qaRunId,
+    attempt: lease.attempt,
+    adapterName: lease.adapterName,
+    adapterKind: adapter.kind,
+    adapterVerificationEvidenceRef: lease.adapterVerificationEvidenceRef,
+    repositoryRoot: state.repo.worktreeRoot,
+    head: state.repo.head,
+    branch: state.repo.branch,
+    workspaceFingerprint: lease.beforeFingerprint,
+    verificationRunId: lease.verificationRunId,
+    verificationSnapshotRef: lease.verificationSnapshotRef,
+  })
+  assertMonotonicQaObservation(previous, observation)
+  const after = await captureWorktreeBoundary(options.cwd)
+  assertReadOnlyQaWorkspace(before, after)
+  await validateResume(state, options.cwd)
+
+  return await updateRun({
+    cwd: options.cwd,
+    runId: state.runId,
+    expectedRevision: state.revision,
+    mutate(next) {
+      const run = {
+        qaRunId: observation.runId,
+        attempt: observation.attempt,
+        adapterName: observation.adapterName,
+        adapterKind: observation.adapterKind,
+        adapterVerificationEvidenceRef: observation.adapterVerificationEvidenceRef,
+        revision: observation.revision,
+        executionStatus: observation.executionStatus,
+        ...(observation.resultStatus === undefined ? {} : { resultStatus: observation.resultStatus }),
+        runRef: observation.runRef,
+        verificationRunId: observation.verificationRunId,
+        verificationSnapshotRef: observation.verificationSnapshotRef,
+        workspaceFingerprint: observation.workspaceFingerprint,
+        ...(observation.evidenceRef === undefined ? {} : { evidenceRef: observation.evidenceRef }),
+        ...(observation.blockerRef === undefined ? {} : { blockerRef: observation.blockerRef }),
+        manualChecklist: [...observation.manualChecklist],
+      }
+      const runIndex = next.qa.runs.findIndex(candidate => candidate.attempt === observation.attempt)
+      if (runIndex === -1) next.qa.runs.push(run)
+      else next.qa.runs[runIndex] = run
+      delete next.qaLease
+      delete next.blocker
+      if (observation.executionStatus === 'RUNNING') {
+        next.status = 'PAUSED'
+      } else if (observation.executionStatus === 'CANCELLED') {
+        next.status = 'CANCELLED'
+      } else if (observation.executionStatus === 'FAILED') {
+        next.status = 'FAILED'
+        next.blocker = { code: 'QA_EXECUTION_FAILED', message: observation.evidenceRef! }
+      } else if (observation.executionStatus === 'BLOCKED') {
+        next.status = 'BLOCKED'
+        next.blocker = { code: 'QA_BLOCKED', message: observation.blockerRef! }
+      } else if (observation.resultStatus === 'PASS') {
+        next.status = 'RUNNING'
+      } else if (observation.resultStatus === 'MANUAL_REQUIRED') {
+        next.status = 'NEEDS_USER'
+        next.blocker = { code: 'QA_MANUAL_REQUIRED', message: observation.evidenceRef! }
+      } else {
+        const created = createQaFindings(next, observation)
+        if (observation.attempt >= next.qa.maxAttempts) {
+          next.status = 'BLOCKED'
+          next.blocker = { code: 'QA_RETRY_EXHAUSTED', message: `QA exhausted ${next.qa.maxAttempts} attempts` }
+        } else {
+          next.phase = 'REMEDIATE'
+          next.status = 'RUNNING'
+          next.currentFinding = created[0]?.findingId
+          next.fullVerificationHistory.push(next.fullVerification!)
+          delete next.fullVerification
+          delete next.fullVerificationLease
+          next.verificationCycle += 1
+        }
+      }
+    },
+  })
+}
+
+const MANUAL_QA_CHECKLIST = Object.freeze([
+  'Exercise the user-visible scenarios affected by the change.',
+  'Record expected versus observed behavior for every scenario.',
+  'Attach durable evidence and report failures with reproduction steps.',
+])
+
+function stableQaRunId(runId: string, attempt: number, verificationSnapshotRef: string, adapterName: string): string {
+  const digest = createHash('sha256')
+    .update(`${runId}\0${attempt}\0${verificationSnapshotRef}\0${adapterName}`)
+    .digest('hex')
+    .slice(0, 16)
+  return `qa-${digest}`
+}
+
+function assertMonotonicQaObservation(
+  previous: RunState['qa']['runs'][number] | undefined,
+  observation: QaObservation,
+): void {
+  if (previous === undefined) return
+  if (observation.runId !== previous.qaRunId || observation.runRef !== previous.runRef) {
+    throw new QaContractError('QA Adapter changed run identity')
+  }
+  if (observation.revision < previous.revision) throw new QaContractError('QA Adapter revision moved backwards')
+  if (
+    observation.revision === previous.revision
+    && (
+      observation.executionStatus !== previous.executionStatus
+      || observation.resultStatus !== previous.resultStatus
+    )
+  ) throw new QaContractError('QA Adapter changed status at the same revision')
+  if (
+    observation.verificationRunId !== previous.verificationRunId
+    || observation.verificationSnapshotRef !== previous.verificationSnapshotRef
+  ) throw new QaContractError('QA Adapter changed Full Verification identity')
+}
+
+function assertReadOnlyQaWorkspace(before: WorktreeBoundary, after: WorktreeBoundary): void {
+  if (before.worktreeRoot !== after.worktreeRoot || before.fingerprint !== after.fingerprint) {
+    throw new QaContractError('QA changed the Git worktree')
+  }
+  const beforeEntries = Object.entries(before.changedPaths).sort(([left], [right]) => left.localeCompare(right))
+  const afterEntries = Object.entries(after.changedPaths).sort(([left], [right]) => left.localeCompare(right))
+  if (JSON.stringify(beforeEntries) !== JSON.stringify(afterEntries)) {
+    throw new QaContractError('QA changed dirty-file scope')
+  }
+}
+
+function createQaFindings(next: RunState, observation: QaObservation): RunState['qa']['findings'] {
+  const created = observation.findings.map((finding, index) => {
+    const findingId = `QAF-${String(observation.attempt).padStart(3, '0')}-${String(index + 1).padStart(3, '0')}`
+    const fingerprint = createHash('sha256')
+      .update(JSON.stringify([finding.symptom, finding.expected, finding.steps, finding.environment]))
+      .digest('hex')
+    const findingRef = `qa:finding:${observation.runId}:${index + 1}`
+    const item: RunState['qa']['findings'][number] = {
+      findingId,
+      status: 'OPEN',
+      fingerprint,
+      symptom: finding.symptom,
+      expected: finding.expected,
+      steps: [...finding.steps],
+      environment: finding.environment,
+      evidenceRef: finding.evidenceRef,
+      qaRunId: observation.runId,
+      qaAttempt: observation.attempt,
+      adapterName: observation.adapterName,
+      qaSnapshotRef: observation.runRef,
+      findingRef,
+      handoffRef: `qa:handoff:${observation.runId}:${index + 1}`,
+    }
+    next.qa.findings.push(item)
+    return item
+  })
+  return created
+}
+
+function stableVerificationRunId(orchestrationRunId: string, cycle: number): string {
+  return `verify-${createHash('sha256').update(`${orchestrationRunId}\0${cycle}`).digest('hex').slice(0, 16)}`
 }
 
 function stableVerificationSnapshot(head: string, workspaceFingerprint: string): string {
@@ -628,18 +948,22 @@ function applyAutoFixObservation(
   }
   delete next.autoFixLease
   delete next.blocker
+  const qaFinding = next.qa.findings.find(candidate => candidate.findingId === findingId)
   if (observation.executionStatus === 'RUNNING') {
     next.status = 'PAUSED'
     next.currentFinding = findingId
   } else if (observation.executionStatus === 'BLOCKED') {
+    if (qaFinding !== undefined) qaFinding.status = 'BLOCKED'
     next.status = 'BLOCKED'
     next.currentFinding = findingId
     next.blocker = { code: 'AUTO_FIX_BLOCKED', message: observation.blockerRef! }
   } else if (observation.executionStatus === 'NEEDS_CONTEXT') {
+    if (qaFinding !== undefined) qaFinding.status = 'BLOCKED'
     next.status = 'NEEDS_USER'
     next.currentFinding = findingId
     next.blocker = { code: 'AUTO_FIX_NEEDS_CONTEXT', message: observation.blockerRef! }
   } else if (observation.executionStatus === 'FAILED') {
+    if (qaFinding !== undefined) qaFinding.status = 'BLOCKED'
     next.status = 'FAILED'
     next.currentFinding = findingId
     next.blocker = { code: 'AUTO_FIX_FAILED', message: observation.executionRef }
@@ -647,26 +971,57 @@ function applyAutoFixObservation(
     next.status = 'CANCELLED'
     next.currentFinding = findingId
   } else {
+    if (qaFinding !== undefined) qaFinding.status = 'RESOLVED'
     next.status = 'RUNNING'
-    const remaining = next.findings.find(candidate =>
-      candidate.status === 'confirmed'
-      && candidate.route === 'auto-fix'
-      && !next.fixRuns.some(run =>
-        run.findingId === candidate.findingId
-        && ['DONE', 'DONE_WITH_CONCERNS'].includes(run.status)))
+    const remaining = nextAutoFixFinding(next)
     if (remaining === undefined) delete next.currentFinding
     else next.currentFinding = remaining.findingId
   }
 }
 
 function nextAutoFixFinding(state: RunState) {
-  const pending = state.findings.filter(finding =>
+  const auditPending = state.findings.filter(finding =>
     finding.status === 'confirmed'
     && finding.route === 'auto-fix'
     && !state.fixRuns.some(run =>
       run.findingId === finding.findingId
       && ['DONE', 'DONE_WITH_CONCERNS'].includes(run.status)))
+  const qaPending = state.qa.findings.filter(finding =>
+    ['OPEN', 'IN_REMEDIATION'].includes(finding.status)
+    && !state.fixRuns.some(run =>
+      run.findingId === finding.findingId
+      && ['DONE', 'DONE_WITH_CONCERNS'].includes(run.status)))
+  const pending = [...auditPending, ...qaPending]
   return pending.find(finding => finding.findingId === state.currentFinding) ?? pending[0]
+}
+
+function autoFixSource(state: RunState, findingId: string, handoffRef: string): AutoFixSource {
+  const qaFinding = state.qa.findings.find(candidate => candidate.findingId === findingId)
+  if (qaFinding !== undefined) {
+    return {
+      kind: 'qa-finding',
+      findingId,
+      handoffRef,
+      qaRunId: qaFinding.qaRunId,
+      qaAttempt: qaFinding.qaAttempt,
+      qaSnapshotRef: qaFinding.qaSnapshotRef,
+      qaFindingRef: qaFinding.findingRef,
+    }
+  }
+  if (
+    state.auditRunId === undefined
+    || state.auditResult === undefined
+    || state.auditResult.status !== 'COMPLETED'
+    || state.auditResult.executionStatus !== 'COMPLETED'
+  ) throw new OrchestratorError('Audit finding remediation requires a completed Audit checkpoint')
+  return {
+    kind: 'audit-finding',
+    findingId,
+    handoffRef,
+    auditRunId: state.auditRunId,
+    auditSnapshotRef: state.auditResult.snapshotRef,
+    findingRegistryRef: state.auditResult.registryRef,
+  }
 }
 
 function stableAutoFixRunId(orchestrationRunId: string, findingId: string): string {

@@ -4,10 +4,11 @@ import type {} from '@deepseek-ai/dsh-skill'
 import z from '@deepseek-ai/schemastery'
 
 import { registerCommands, resumeCommand, runCommand, statusCommand } from './commands.js'
-import { advanceAuditRun, advanceFullVerification, advanceRemediationRun } from './orchestrator.js'
+import { advanceAuditRun, advanceFullVerification, advanceQaRun, advanceRemediationRun } from './orchestrator.js'
 import type { AuditAdapter } from './audit.js'
 import type { AutoFixAdapter } from './autofix.js'
 import type { FullVerificationAdapter } from './verification.js'
+import type { QaAdapter } from './qa/index.js'
 
 export * from './commands.js'
 export * from './authorization.js'
@@ -43,6 +44,7 @@ export class DevHarnessRuntime extends Service {
   private auditAdapter?: AuditAdapter
   private autoFixAdapter?: AutoFixAdapter
   private fullVerificationAdapter?: FullVerificationAdapter
+  private readonly qaAdapters = new Map<string, QaAdapter>()
 
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'devHarness')
@@ -70,11 +72,12 @@ export class DevHarnessRuntime extends Service {
     const adapter = this.auditAdapter
     const autoFixAdapter = this.autoFixAdapter
     const fullVerificationAdapter = this.fullVerificationAdapter
+    const qaAdapters = [...this.qaAdapters.values()]
     return resumeCommand(
       this.ctx,
       this.requiredSkills,
       invocation,
-      adapter === undefined && autoFixAdapter === undefined && fullVerificationAdapter === undefined
+      adapter === undefined && autoFixAdapter === undefined && fullVerificationAdapter === undefined && qaAdapters.length === 0
         ? undefined
         : (state, signal) => {
             if (['PREFLIGHT', 'AUDIT'].includes(state.phase)) {
@@ -91,6 +94,14 @@ export class DevHarnessRuntime extends Service {
               return advanceRemediationRun({ cwd: state.repo.worktreeRoot, runId: state.runId, signal, adapter: autoFixAdapter })
             }
             if (['REMEDIATE', 'FULL_VERIFY'].includes(state.phase)) {
+              if (state.phase === 'FULL_VERIFY' && state.fullVerification?.status === 'PASS') {
+                return advanceQaRun({
+                  cwd: state.repo.worktreeRoot,
+                  runId: state.runId,
+                  signal,
+                  adapters: qaAdapters,
+                })
+              }
               if (fullVerificationAdapter === undefined) return Promise.resolve(state)
               return advanceFullVerification({
                 cwd: state.repo.worktreeRoot,
@@ -98,6 +109,9 @@ export class DevHarnessRuntime extends Service {
                 signal,
                 adapter: fullVerificationAdapter,
               })
+            }
+            if (state.phase === 'QA') {
+              return advanceQaRun({ cwd: state.repo.worktreeRoot, runId: state.runId, signal, adapters: qaAdapters })
             }
             return Promise.resolve(state)
           },
@@ -149,6 +163,23 @@ export class DevHarnessRuntime extends Service {
     if (this.fullVerificationAdapter === undefined) throw new Error('no Full Verification Adapter is registered')
     return advanceFullVerification({ cwd, runId, signal, adapter: this.fullVerificationAdapter })
   }
+
+  registerQaAdapter(adapter: QaAdapter): () => void {
+    if (adapter.verified !== true) throw new TypeError(`QA Adapter ${adapter.name} is not verified`)
+    if (typeof adapter.verificationEvidenceRef !== 'string' || adapter.verificationEvidenceRef.length === 0) {
+      throw new TypeError(`QA Adapter ${adapter.name} has no verification evidence`)
+    }
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(adapter.name)) throw new TypeError('invalid QA Adapter name')
+    if (this.qaAdapters.has(adapter.name)) throw new Error(`QA Adapter ${adapter.name} is already registered`)
+    this.qaAdapters.set(adapter.name, adapter)
+    return () => {
+      if (this.qaAdapters.get(adapter.name) === adapter) this.qaAdapters.delete(adapter.name)
+    }
+  }
+
+  advanceQa(cwd: string, runId: string, signal: AbortSignal) {
+    return advanceQaRun({ cwd, runId, signal, adapters: [...this.qaAdapters.values()] })
+  }
 }
 
 function hasPendingAutoFix(state: import('./state.js').RunState): boolean {
@@ -158,6 +189,11 @@ function hasPendingAutoFix(state: import('./state.js').RunState): boolean {
     && !state.fixRuns.some(run =>
       run.findingId === finding.findingId
       && ['DONE', 'DONE_WITH_CONCERNS'].includes(run.status)))
+    || state.qa.findings.some(finding =>
+      ['OPEN', 'IN_REMEDIATION'].includes(finding.status)
+      && !state.fixRuns.some(run =>
+        run.findingId === finding.findingId
+        && ['DONE', 'DONE_WITH_CONCERNS'].includes(run.status)))
 }
 
 export function apply(ctx: Context, config: Config = {}): void {

@@ -102,7 +102,7 @@ export async function resumeCommand(
           delete next.blocker
         },
       })
-  const final = advance !== undefined && ['PREFLIGHT', 'AUDIT', 'ROUTE', 'REMEDIATE', 'FULL_VERIFY'].includes(resumed.phase)
+  const final = advance !== undefined && ['PREFLIGHT', 'AUDIT', 'ROUTE', 'REMEDIATE', 'FULL_VERIFY', 'QA'].includes(resumed.phase)
     ? await advance(resumed, invocation.signal)
     : resumed
   return success(final)

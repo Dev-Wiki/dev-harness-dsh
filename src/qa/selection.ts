@@ -14,6 +14,9 @@ export function selectQaAdapter(adapters: readonly QaAdapter[], preferredName?: 
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(adapter.name)) throw new TypeError(`invalid QA Adapter name: ${adapter.name}`)
     if (!(QA_ADAPTER_KINDS as readonly string[]).includes(adapter.kind)) throw new TypeError(`invalid QA Adapter kind: ${adapter.kind}`)
     if (adapter.verified !== true) throw new TypeError(`QA Adapter ${adapter.name} is not verified`)
+    if (typeof adapter.verificationEvidenceRef !== 'string' || adapter.verificationEvidenceRef.length === 0) {
+      throw new TypeError(`QA Adapter ${adapter.name} has no verification evidence`)
+    }
     if (names.has(adapter.name)) throw new TypeError(`duplicate QA Adapter name: ${adapter.name}`)
     names.add(adapter.name)
   }

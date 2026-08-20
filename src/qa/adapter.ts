@@ -33,6 +33,7 @@ export interface QaAdapter {
   readonly name: string
   readonly kind: QaAdapterKind
   readonly verified: true
+  readonly verificationEvidenceRef: string
   start(request: QaStartRequest): Promise<unknown>
   resume(request: QaResumeRequest): Promise<unknown>
 }
@@ -59,6 +60,7 @@ export interface QaObservation {
   readonly revision: number
   readonly adapterName: string
   readonly adapterKind: QaAdapterKind
+  readonly adapterVerificationEvidenceRef: string
   readonly executionStatus: QaExecutionStatus
   readonly resultStatus?: QaResultStatus
   readonly repositoryRoot: string
@@ -93,6 +95,7 @@ export function validateQaObservation(
     readonly attempt: number
     readonly adapterName: string
     readonly adapterKind: QaAdapterKind
+    readonly adapterVerificationEvidenceRef: string
     readonly repositoryRoot: string
     readonly head: string
     readonly branch: string
@@ -107,6 +110,7 @@ export function validateQaObservation(
   exactInteger(record, 'attempt', expected.attempt)
   exact(record, 'adapterName', expected.adapterName)
   exact(record, 'adapterKind', expected.adapterKind)
+  exact(record, 'adapterVerificationEvidenceRef', expected.adapterVerificationEvidenceRef)
   exact(record, 'repositoryRoot', expected.repositoryRoot)
   exact(record, 'head', expected.head)
   exact(record, 'branch', expected.branch)
@@ -180,6 +184,7 @@ export function validateQaObservation(
     revision,
     adapterName: expected.adapterName,
     adapterKind: expected.adapterKind,
+    adapterVerificationEvidenceRef: expected.adapterVerificationEvidenceRef,
     executionStatus,
     ...(resultStatus === undefined ? {} : { resultStatus }),
     repositoryRoot: expected.repositoryRoot,

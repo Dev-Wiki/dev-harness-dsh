@@ -200,6 +200,7 @@ export interface QaRunRef {
   attempt: number
   adapterName: string
   adapterKind: string
+  adapterVerificationEvidenceRef: string
   revision: number
   executionStatus: string
   resultStatus?: string
@@ -241,6 +242,7 @@ export interface QaLease {
   attempt: number
   adapterName: string
   adapterKind: string
+  adapterVerificationEvidenceRef: string
   verificationRunId: string
   verificationSnapshotRef: string
   beforeFingerprint: string
@@ -773,6 +775,7 @@ function parseRunState(value: unknown): RunState {
         attempt: requireInteger(entry, 'attempt', 1),
         adapterName: requireString(entry, 'adapterName'),
         adapterKind: requireString(entry, 'adapterKind'),
+        adapterVerificationEvidenceRef: requireString(entry, 'adapterVerificationEvidenceRef'),
         revision: requireInteger(entry, 'revision'),
         executionStatus: requireString(entry, 'executionStatus'),
         ...(optionalString(entry, 'resultStatus') === undefined
@@ -884,6 +887,7 @@ function parseRunState(value: unknown): RunState {
           attempt: requireInteger(qaLeaseRecord, 'attempt', 1),
           adapterName: requireString(qaLeaseRecord, 'adapterName'),
           adapterKind: requireString(qaLeaseRecord, 'adapterKind'),
+          adapterVerificationEvidenceRef: requireString(qaLeaseRecord, 'adapterVerificationEvidenceRef'),
           verificationRunId: requireString(qaLeaseRecord, 'verificationRunId'),
           verificationSnapshotRef: requireString(qaLeaseRecord, 'verificationSnapshotRef'),
           beforeFingerprint: requireString(qaLeaseRecord, 'beforeFingerprint'),

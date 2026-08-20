@@ -45,3 +45,32 @@ test('core required Skills cannot be configured away', async () => {
     await ctx.fiber.dispose()
   }
 })
+
+test('QA registration accepts only named verified Adapters and owns their lifecycle', async () => {
+  const ctx = new Context()
+  await ctx.plugin(Commands)
+  await ctx.plugin(SkillRegistry)
+  const fiber = await ctx.plugin(Plugin)
+  const adapter = {
+    name: 'fixture-qa',
+    kind: 'cli-api',
+    verified: true,
+    verificationEvidenceRef: 'qa:adapter-verification:fixture',
+    async start() {},
+    async resume() {},
+  }
+  try {
+    assert.throws(
+      () => ctx.devHarness.registerQaAdapter({ ...adapter, name: 'unverified', verified: false }),
+      /not verified/u,
+    )
+    const unregister = ctx.devHarness.registerQaAdapter(adapter)
+    assert.throws(() => ctx.devHarness.registerQaAdapter(adapter), /already registered/u)
+    unregister()
+    const unregisterAgain = ctx.devHarness.registerQaAdapter(adapter)
+    unregisterAgain()
+  } finally {
+    await fiber.dispose()
+    await ctx.fiber.dispose()
+  }
+})

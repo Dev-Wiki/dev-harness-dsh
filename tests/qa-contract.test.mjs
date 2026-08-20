@@ -13,6 +13,7 @@ const expected = Object.freeze({
   attempt: 1,
   adapterName: 'qa-external',
   adapterKind: 'external-skill',
+  adapterVerificationEvidenceRef: 'qa:adapter-verification:external',
   repositoryRoot: '/repo',
   head: 'a'.repeat(40),
   branch: 'main',
@@ -29,6 +30,7 @@ function observation(overrides = {}) {
     revision: 1,
     adapterName: expected.adapterName,
     adapterKind: expected.adapterKind,
+    adapterVerificationEvidenceRef: expected.adapterVerificationEvidenceRef,
     executionStatus: 'COMPLETED',
     resultStatus: 'PASS',
     repositoryRoot: expected.repositoryRoot,
@@ -94,7 +96,12 @@ test('rejects false PASS, incomplete QaFinding, and terminal claims on RUNNING',
 })
 
 test('selects explicit adapters first, then verified kind priority, else manual fallback', () => {
-  const noop = { name: 'qa-native', async start() {}, async resume() {} }
+  const noop = {
+    name: 'qa-native',
+    verificationEvidenceRef: 'qa:adapter-verification:fixture',
+    async start() {},
+    async resume() {},
+  }
   const native = defineNativeQaAdapter(noop)
   const external = defineExternalSkillQaAdapter({ ...noop, name: 'qa-external' })
   const cli = { ...noop, name: 'qa-cli', kind: 'cli-api', verified: true }
@@ -105,5 +112,13 @@ test('selects explicit adapters first, then verified kind priority, else manual 
   assert.throws(
     () => selectQaAdapter([{ ...cli, name: 'unverified', verified: false }]),
     /not verified/u,
+  )
+  assert.throws(
+    () => selectQaAdapter([{ ...cli, name: 'no-evidence', verificationEvidenceRef: '' }]),
+    /no verification evidence/u,
+  )
+  assert.throws(
+    () => validateQaObservation(observation({ adapterVerificationEvidenceRef: 'qa:changed' }), expected),
+    /adapterVerificationEvidenceRef does not match/u,
   )
 })
