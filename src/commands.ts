@@ -21,6 +21,9 @@ const KNOWN_COMMAND_ERRORS = new Set([
   'DEPENDENCY_MISMATCH',
   'HEAD_MISMATCH',
   'INVALID_RUN_ID',
+  'INVALID_TRANSITION',
+  'NOT_GIT_REPOSITORY',
+  'REVISION_CONFLICT',
   'RUN_EXISTS',
   'STATE_CORRUPT',
   'STATE_NOT_FOUND',
@@ -47,6 +50,19 @@ export function registerCommands(ctx: Context, runtime: DevHarnessRuntime): void
     input: { hint: '[run-id]' },
     handler: invocation => settleCommand(() => runtime.status(invocation)),
   })
+  ctx.commands.register({
+    name: 'harness-cancel',
+    description: 'Cancel an active dev-harness run in this workspace.',
+    input: { hint: '[run-id]' },
+    handler: invocation => settleCommand(() => cancelCommand(invocation)),
+  })
+}
+
+async function cancelCommand(invocation: CommandInvocation): Promise<CommandResult> {
+  const cwd = requireCwd(invocation)
+  const requested = optionalOneArg(invocation.rawInput, 'harness-cancel')
+  const runId = requested ?? selectCurrentRun(await listRuns(cwd)).runId
+  return success(await cancelRun(cwd, runId))
 }
 
 export async function runCommand(
@@ -121,7 +137,7 @@ export async function statusCommand(invocation: CommandInvocation): Promise<Comm
 
 export async function cancelRun(cwd: string, runId: string): Promise<RunState> {
   const state = await loadRun(cwd, runId)
-  if (state.status === 'CANCELLED') return state
+  if (['FAILED', 'DONE', 'DONE_WITH_CONCERNS', 'CANCELLED'].includes(state.status)) return state
   return await updateRun({
     cwd,
     runId,

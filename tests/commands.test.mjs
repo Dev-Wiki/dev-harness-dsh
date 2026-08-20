@@ -95,7 +95,12 @@ test('run, status, pause/resume, cancel, and command lifecycle stay deterministi
   const harness = await createHarness()
   try {
     const descriptors = harness.ctx.commands.list(harness.agent).map(command => command.name)
-    assert.deepEqual(descriptors, ['harness-resume', 'harness-run', 'harness-status'])
+    assert.deepEqual(descriptors, [
+      'harness-cancel',
+      'harness-resume',
+      'harness-run',
+      'harness-status',
+    ])
 
     const started = await execute(harness, '/harness-run')
     assert.equal(started?.result.kind, 'success')
@@ -139,6 +144,29 @@ test('run, status, pause/resume, cancel, and command lifecycle stay deterministi
       assert.equal(lifecycle[index].data.commandId, lifecycle[index + 1].data.commandId)
     }
     assert.equal(harness.session.events.some(event => event.type === 'turn/start'), false)
+  } finally {
+    await harness.dispose()
+  }
+})
+
+test('cancel command cancels the current run and stays idempotent', async () => {
+  const harness = await createHarness()
+  try {
+    const started = await execute(harness, '/harness-run')
+    assert.equal(started?.result.kind, 'success')
+    const runId = JSON.parse(started.result.text).runId
+
+    const cancelled = await execute(harness, '/harness-cancel')
+    assert.equal(cancelled?.result.kind, 'success')
+    const cancelledView = JSON.parse(cancelled.result.text)
+    assert.equal(cancelledView.status, 'CANCELLED')
+    assert.equal(cancelledView.runId, runId)
+
+    const again = await execute(harness, '/harness-cancel')
+    assert.equal(JSON.parse(again.result.text).status, 'CANCELLED')
+
+    const byId = await execute(harness, `/harness-cancel ${runId}`)
+    assert.equal(JSON.parse(byId.result.text).status, 'CANCELLED')
   } finally {
     await harness.dispose()
   }
