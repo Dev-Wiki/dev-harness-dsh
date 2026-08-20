@@ -162,3 +162,5 @@ DSH_HOME=<isolated-dir> node_modules/.bin/dsh --profile headless --dump-config
 V0 的生产实现前置证据与 K1 状态/命令基线均已完成，K2 可以在稳定 seam 上启动。外部 QA Skill 不作为 V0 的硬依赖：当前环境没有已验证的稳定 QA Skill 输入、授权与完成状态协议，因此 S2 必须按产品选择顺序重新发现能力；在验证出更高优先级 Adapter 前，唯一可声明可用的兜底是生成手工检查清单，且不得把 `MANUAL_REQUIRED` 冒充 `PASS`。
 
 生产 `harness:build` / `test` / `quick` / `bugfix` / `full` 已由 K1 建立并通过本机运行验证；fixture `verify` 仍不得冒充生产 `harness:full`。S1 只消费该已确认 full 入口，并负责持久化结果与失败传播。任何只有类型声明而无运行证据的能力必须继续标为源码已确认，不得写成“本项目可用”。
+
+K2 不把 Codebase Audit `runtime.py` CLI 当成启动 Skill 的产品协议：该 runtime 只负责快照、状态和路径门禁，且各子命令 JSON wrapper 与错误外壳不统一。生产 Plugin 只消费版本化 `AuditAdapter` Observation；Adapter 负责实际 Skill/Agent 执行、CLI 归一化、typed route、artifact 完整性与 quiescent output hash。未注册 Adapter 时 Run 不越过 PREFLIGHT，也不把 Skill catalog 中“存在”误报为“已执行”。

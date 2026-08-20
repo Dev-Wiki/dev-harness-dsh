@@ -27,9 +27,9 @@
 ## 1. 项目上下文速查
 
 - **语言/框架**: TypeScript ES modules，Cordis 4.0.1 Plugin，DeepSeek Harness 0.1.0-rc.8，Schemastery 3.18.1，Node.js 22.19+
-- **架构模式**: 生产 Cordis Service、Human Command、Skill preflight 与原子 Run State 分层实现；产品需求、活动计划与集成证据分别维护，V0 fixture 保留为兼容性证明
+- **架构模式**: 生产 Cordis Service、Human Command、原子 Run State、版本化 Adapter、可恢复 Orchestrator 与 Finding Router 分层实现；V0 fixture 保留为 rc.8 兼容性证明
 - **核心入口**: src/index.ts 的 named Cordis plugin exports 与 DevHarnessRuntime service
-- **核心调用链**: 生产 Human Command 先做 cwd-sensitive Skill preflight，再创建或恢复 private-Git-dir Run State；状态更新使用锁、revision CAS 与环境漂移复核
+- **核心调用链**: Human Command 先做 Skill preflight，再由 Audit Adapter 在 OPEN mutation lease 内启动/恢复；Plugin 独立核对 Git 输出哈希、接纳新 baseline，并只路由当前 confirmed Finding
 - **版本识别依据**: 目标版本 dsh-v0.1.0-rc.8 / commit 141eb6fef83422698aef7a981029e843e8161534；生产依赖图由根 pnpm-lock.yaml 固定
 
 ## 1b. 文件信任等级
@@ -60,11 +60,11 @@ Plugin owns orchestration；Skill owns semantics。需求、计划、实现证�
 
 ## 5. 高风险文件标注
 
-依赖版本、bundle patch、plugin inject/effect 生命周期、Git private dir 与原子状态持久化属于高风险边界
+依赖版本、bundle patch、Plugin/Adapter 生命周期、Git private dir、mutation lease、原子状态与 workspace checkpoint 属于高风险边界
 
 ## 6. 新增功能的一般流程
 
-生产实现位于 src、自动化位于 tests；产品需求在 docs/product，执行计划在 docs/plan，集成证据在 docs/integration，V0 兼容实验位于 experiments/v0-minimal-plugin
+生产 Adapter/Orchestrator/Router/State 位于 src，对应真实 Git fixture 位于 tests；产品需求、计划和集成停止线分别位于 docs/product、docs/plan、docs/integration
 
 ## 7. 代码安全规范
 
@@ -80,7 +80,7 @@ Human Command 生命周期由 Session 的 command/run 与 command/done 记录；
 
 ## 10. 提问与探索建议
 
-先读 Dashboard、HARNESS 与 DSH_API_BASELINE，再沿根 package.json、src/index.ts、commands/skills/state 和对应 tests 探索；V0 细节再进入 experiments fixture
+先读 Dashboard、HARNESS 与 DSH_API_BASELINE，再沿 src/index.ts、audit/orchestrator/router/state 和对应 tests 探索；Adapter 不直接绑定下游 runtime CLI 外壳
 
 ## 11. 自动识别候选
 
@@ -92,7 +92,7 @@ Human Command 生命周期由 Session 的 command/run 与 command/done 记录；
 
 ## 12. 需人工确认
 
-- K2 尚需固定 Audit Skill 的可执行 Adapter、权威 Finding Registry 与 handoff 输入契约
+- K3 尚需固定 Auto Fix Adapter、权威 CompletionStatus 与 residual risk 输入契约
 - 外部 QA Skill 协议尚未验证；S2 在验证 Adapter 前只声明 manual checklist fallback
 
 ## 13. 代码风格示例（仓库抽样）
@@ -100,14 +100,14 @@ Human Command 生命周期由 Session 的 command/run 与 command/done 记录；
 以下路径由扫描器按优先级从仓库抽样。**新增或修改代码应优先对齐**这些文件的组织方式（命名空间/模块分层、import/using 顺序、注释粒度、async 习惯等），避免在同目录或同层引入另一种写法。
 - `experiments/v0-minimal-plugin/src/index.ts`
   - 结构性首行（截断）：`export const name = 'dev-harness-dsh-v0-fixture'`
+- `src/audit.ts`
+  - 结构性首行（截断）：`const AUDIT_RUN_ID = /^[A-Za-z0-9._-]+$/u`
 - `src/commands.ts`
   - 结构性首行（截断）：`type RunState,`
 - `src/index.ts`
   - 结构性首行（截断）：`export * from './commands.js'`
-- `src/skills.ts`
-  - 结构性首行（截断）：`export type SkillPreflightErrorCode = 'SKILL_CATALOG_INCOMPLETE' | 'REQUIRED_SKILLS_MISSING'`
-- `src/state.ts`
-  - 结构性首行（截断）：`const execFile = promisify(execFileCallback)`
+- `src/orchestrator.ts`
+  - 结构性首行（截断）：`type AuditAdapter,`
 
 ## 14. 复盘结论正式写入说明
 

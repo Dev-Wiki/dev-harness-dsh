@@ -1,7 +1,7 @@
 # dev-harness-dsh
 
 ## 项目简介
-dev-harness-dsh 把 Audit、Auto Fix、验证、QA 与最终复核编排为可恢复运行；V0 与生产 K1 基线已完成，当前进入 Audit Orchestration 与 Finding Router
+dev-harness-dsh 把 Audit、Auto Fix、验证、QA 与最终复核编排为可恢复运行；V0、K1 与 Audit/Router K2 已完成，当前进入 Auto Fix 队列与恢复
 
 ## 编程语言
 TypeScript

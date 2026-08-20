@@ -4,12 +4,14 @@
 生产包 peer 依赖 Cordis、dsh-commands 与 dsh-skill，运行时依赖 atomic-write 与 Schemastery；开发依赖精确锁定 rc.8 Session 与 Skill filesystem 测试栈
 
 ## 核心业务流程
-生产 Human Command 先做 cwd-sensitive Skill preflight，再创建或恢复 private-Git-dir Run State；状态更新使用锁、revision CAS 与环境漂移复核
+Human Command 先做 Skill preflight，再由 Audit Adapter 在 OPEN mutation lease 内启动/恢复；Plugin 独立核对 Git 输出哈希、接纳新 baseline，并只路由当前 confirmed Finding
 
 ## 架构模式
-生产 Cordis Service、Human Command、Skill preflight 与原子 Run State 分层实现；产品需求、活动计划与集成证据分别维护，V0 fixture 保留为兼容性证明
+生产 Cordis Service、Human Command、原子 Run State、版本化 Adapter、可恢复 Orchestrator 与 Finding Router 分层实现；V0 fixture 保留为 rc.8 兼容性证明
 
 ## 模块接口与通信方式
+- Audit Adapter：版本化 Observation + OPEN mutation lease + quiescent workspace checkpoint
+- Finding Router：typed handoff 驱动路由，只有 confirmed defect 进入 Auto Fix
 - Bundle manifest：package.json 的 dsh.bundle.patch 指向 cordis.patch.yml
 - Plugin surface：name、inject、Config、apply(ctx, config)
 - Human Command：ctx.commands.register 与 command/run、command/done 生命周期
@@ -20,6 +22,8 @@
 - Run State：Git private dir + environment snapshot + file lock + revision CAS
 
 ## 关键模块标记
+- AuditAdapter + AuditObservation
+- auditLease + auditCheckpoint + advanceAuditRun
 - ctx.devHarness + harness-run/resume/status
 - private Git dir + revision CAS + validateResume
 - dsh.bundle.patch

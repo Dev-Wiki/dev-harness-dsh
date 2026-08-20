@@ -4,7 +4,7 @@
 它定义可执行命令、运行条件和验证边界，不替代 `AGENTS.md` 中的行为、安全与修改约束。
 
 ## 项目类型
-DeepSeek Harness TypeScript Plugin 项目；Task V0 与 K1 已完成，Task K2 Audit Orchestration 开发中
+DeepSeek Harness TypeScript Plugin 项目；Task V0、K1、K2 已完成，Task K3 Auto Fix 队列开发中
 
 ## 编译与启动问题排查
 - **WorkingDirectory**: repository root
@@ -32,7 +32,7 @@ DeepSeek Harness TypeScript Plugin 项目；Task V0 与 K1 已完成，Task K2 A
 - **Preconditions**: 已执行 `pnpm install --frozen-lockfile --ignore-scripts`
 - **DeviceRequirement**: `none`
 - **Shell / Environment**: 项目兼容 shell；无 LLM/API 凭据要求；pack dry-run 需要可写 npm cache
-- **Evidence**: `package.json:28-32`；2026-08-20 本机执行 `npm run harness:full`，typecheck、Oxlint、12 tests 与 pack dry-run PASS
+- **Evidence**: `package.json:28-32`；2026-08-20 本机执行生产 full，typecheck、Oxlint、20 个自动化用例与 pack dry-run PASS
 - **Status**: `confirmed`
 
 ### V0 fixture build
@@ -87,5 +87,5 @@ DeepSeek Harness TypeScript Plugin 项目；Task V0 与 K1 已完成，Task K2 A
 - full: npm run harness:full
 
 ## 需人工确认
-- K2 尚需固定 Audit Skill 的可执行 Adapter、权威 Finding Registry 与 handoff 输入契约
+- K3 尚需固定 Auto Fix Adapter、权威 CompletionStatus 与 residual risk 输入契约
 - 外部 QA Skill 协议尚未验证；S2 在验证 Adapter 前只声明 manual checklist fallback

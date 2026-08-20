@@ -2,7 +2,7 @@
 
 > 本文档是 [Dashboard.md](Dashboard.md) 的执行层补充。产品边界与验收口径以 [MVP 需求](../product/REQUIREMENTS.md) 为准。
 >
-> **当前主题**：dev-harness-dsh MVP。Task V0 与 K1 已完成，Task K2 开发中；其他任务未经实现和验证证据不得标记完成。
+> **当前主题**：dev-harness-dsh MVP。Task V0、K1、K2 已完成，Task K3 开发中；其他任务未经实现和验证证据不得标记完成。
 
 <a id="task-v0"></a>
 ## 0. 前置调研：DSH 集成面与工具链基线（Task V0）
@@ -96,8 +96,8 @@
 ### Task K2：Audit Orchestration 与 Finding Router
 
 - **优先级**：🔴 P0
-- **状态**：🚧 开发中
-- **估时**：K1 完成后评估
+- **状态**：✅ 已完成
+- **估时**：已完成（2026-08-20）
 - **依赖**：Task K1；可运行的 `dev-harness-codebase-audit` 目标 fixture
 
 **目标**：
@@ -122,13 +122,21 @@
 4. 测试 candidate、rejected、stale 和未知类型不会进入 defect 队列。
 5. 验证 Plugin state 只保存引用和汇总。
 
+**完成证据（2026-08-20）**：
+
+- `src/audit.ts` 固定版本化 Adapter/Observation：run/snapshot/context/branch、Task、cross-module、artifact、workspace 与 typed handoff 均 fail closed 校验；Plugin 不绑定 `runtime.py` 不一致的 CLI wrapper；
+- `src/orchestrator.ts` 在 Adapter 调用前原子持久化 OPEN mutation lease，独立核对真实 Git 输出路径/哈希后才接纳新 baseline；Adapter 崩溃可幂等重入，越界业务文件写入被拒绝并保留 lease；
+- `/harness-run` / `/harness-resume` 在注册 Adapter 时直接启动/恢复 Audit；ACTIVE 暂停，STALE/BLOCKED/FAILED/CANCELLED 保留明确状态，只有当前且完成 cross-module reconciliation 的 Observation 进入 ROUTE；
+- Router 仅将带显式 `dev-harness-auto-fix` handoff 的 confirmed defect 放入修复队列；其他 confirmed 类型生成对应引用，candidate / needs-verification / rejected / stale / resolved 不入队；
+- 自动化使用真实临时 Git 仓库验证 start→pause→resume→route、Human Command 无模型路径、崩溃恢复、越界拒绝和 state 不复制 Claim/Evidence 正文；生产 `npm run verify` PASS。
+
 ---
 
 <a id="task-k3"></a>
 ### Task K3：Auto Fix 队列、暂停与恢复
 
 - **优先级**：🔴 P0
-- **状态**：📋 规划中
+- **状态**：🚧 开发中
 - **估时**：K2 完成后评估
 - **依赖**：Task K2；可运行的 `dev-harness-auto-fix` fixture
 
@@ -329,4 +337,4 @@
 
 ---
 
-*最后更新：2026-08-20（Task K1 完成，Task K2 启动）*
+*最后更新：2026-08-20（Task K2 完成，Task K3 启动）*

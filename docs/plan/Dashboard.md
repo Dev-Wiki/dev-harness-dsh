@@ -4,10 +4,10 @@
 
 ## 1. 进度快照
 
-- **核心阶段**：K2 Audit Orchestration 与 Finding Router（🚧 开发中）
-- **当前瓶颈**：K1 已提供生产 Plugin、原子 Run State、Human Command 与 fail-closed Skill preflight；K2 尚未固定可执行 Audit 产物 Adapter 与 Finding handoff 输入契约
+- **核心阶段**：K3 Auto Fix 队列与恢复（🚧 开发中）
+- **当前瓶颈**：K2 已提供版本化 Audit Adapter、mutation lease/checkpoint 与 Finding Router；K3 尚未固定 Auto Fix CompletionStatus Adapter 和逐项队列恢复契约
 - **首版目标**：完成 Audit → Finding Router → Auto Fix → Full Verification → QA → Final Reconciliation → Report 的可恢复编排闭环
-- **需求状态**：MVP 需求已整理；DSH 目标版本固定为 rc.8，V0 与 K1 已完成，生产编排进入 K2
+- **需求状态**：MVP 需求已整理；DSH 目标版本固定为 rc.8，V0、K1、K2 已完成，生产编排进入 K3
 
 ## 2. 当前产品目标
 
@@ -21,8 +21,8 @@
 |---|---|---|---|
 | **V0 — DSH 集成面调研** | 🔴 P0 | ✅ 已完成 | [Task V0](TaskDetails.md#task-v0) |
 | **K1 — Plugin Skeleton 与状态基线** | 🔴 P0 | ✅ 已完成 | [Task K1](TaskDetails.md#task-k1) |
-| **K2 — Audit Orchestration 与 Router** | 🔴 P0 | 🚧 开发中 | [Task K2](TaskDetails.md#task-k2) |
-| **K3 — Auto Fix 队列与恢复** | 🔴 P0 | 📋 规划中 | [Task K3](TaskDetails.md#task-k3) |
+| **K2 — Audit Orchestration 与 Router** | 🔴 P0 | ✅ 已完成 | [Task K2](TaskDetails.md#task-k2) |
+| **K3 — Auto Fix 队列与恢复** | 🔴 P0 | 🚧 开发中 | [Task K3](TaskDetails.md#task-k3) |
 | **K4 — 提交授权模型** | 🔴 P0 | 📋 规划中 | [Task K4](TaskDetails.md#task-k4) |
 | **S1 — Full Verification** | 🟡 P1 | 📋 规划中 | [Task S1](TaskDetails.md#task-s1) |
 | **S2 — QA Adapter 与失败闭环** | 🟡 P1 | 📋 规划中 | [Task S2](TaskDetails.md#task-s2) |
@@ -45,8 +45,8 @@
 
 ## 5. 当前缺口与起手任务
 
-1. **K2 — Audit Orchestration 与 Router**（🔴 P0，🚧 开发中）：在 K1 的稳定状态与命令 seam 上固定 Audit Adapter、Finding Registry 引用和 handoff 驱动路由。
-2. **K3 — Auto Fix 队列与恢复**（🔴 P0）：等待 K2 提供 confirmed defect 队列和权威 Finding 引用后接入逐项修复。
+1. **K3 — Auto Fix 队列与恢复**（🔴 P0，🚧 开发中）：消费 K2 的 confirmed defect 队列，以独立 Auto Fix Run 和权威 CompletionStatus 逐项推进。
+2. **K4 — 提交授权模型**（🔴 P0）：等待 K3 固定修改/验证完成边界后，把 `fix-only` / `commit-each` 授权固化到 Run。
 
 > 起手顺序：V0 → K1 → K2 → K3 → K4 → S1 → S2 → S3 → S4。
 
@@ -61,4 +61,4 @@
 
 ---
 
-*最后更新：2026-08-20（Task K1 完成，Task K2 启动）*
+*最后更新：2026-08-20（Task K2 完成，Task K3 启动）*
