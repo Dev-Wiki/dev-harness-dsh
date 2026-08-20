@@ -103,7 +103,7 @@ export async function resumeCommand(
         },
       })
   const final = advance !== undefined
-    && ['PREFLIGHT', 'AUDIT', 'ROUTE', 'REMEDIATE', 'FULL_VERIFY', 'QA', 'FINAL_RECONCILE'].includes(resumed.phase)
+    && ['PREFLIGHT', 'AUDIT', 'ROUTE', 'REMEDIATE', 'FULL_VERIFY', 'QA', 'FINAL_RECONCILE', 'REPORT'].includes(resumed.phase)
     ? await advance(resumed, invocation.signal)
     : resumed
   return success(final)
@@ -209,6 +209,7 @@ function success(state: RunState): CommandResult {
       phase: state.phase,
       status: state.status,
       authorization: state.authorization,
+      ...(state.summary === undefined ? {} : { summary: state.summary }),
     }),
   }
 }

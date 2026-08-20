@@ -30,6 +30,7 @@ import {
   type FinalReconciliationAdapter,
   type FinalReconciliationObservation,
 } from './reconciliation.js'
+import { assertRunSummaryMatchesState, createRunSummary } from './report.js'
 import {
   FULL_VERIFICATION_COMMAND,
   FullVerificationContractError,
@@ -956,6 +957,48 @@ export async function advanceFinalReconciliation(options: {
         next.status = 'RUNNING'
       }
     },
+  })
+}
+
+export async function advanceRunSummary(options: {
+  readonly cwd: string
+  readonly runId: string
+  readonly signal: AbortSignal
+  readonly now?: Date
+}): Promise<RunState> {
+  throwIfAborted(options.signal)
+  let state = await loadRun(options.cwd, options.runId)
+  if (!['FINAL_RECONCILE', 'REPORT'].includes(state.phase)) {
+    throw new OrchestratorError(`Run Summary cannot advance from phase ${state.phase}`)
+  }
+  await validateResume(state, options.cwd)
+  if (state.phase === 'FINAL_RECONCILE') {
+    if (state.finalReconciliation?.executionStatus !== 'COMPLETED') {
+      throw new OrchestratorError('Run Summary requires completed Final Reconciliation')
+    }
+    const summary = createRunSummary(state, options.now)
+    state = await updateRun({
+      cwd: options.cwd,
+      runId: state.runId,
+      expectedRevision: state.revision,
+      mutate(next) {
+        next.phase = 'REPORT'
+        next.summary = summary
+      },
+      now: options.now,
+    })
+  }
+  if (state.summary === undefined) throw new OrchestratorError('REPORT phase has no persisted Run Summary')
+  assertRunSummaryMatchesState(state.summary, state)
+  return await updateRun({
+    cwd: options.cwd,
+    runId: state.runId,
+    expectedRevision: state.revision,
+    mutate(next) {
+      next.phase = 'DONE'
+      next.status = state.summary!.overallStatus
+    },
+    now: options.now,
   })
 }
 

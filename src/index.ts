@@ -10,6 +10,7 @@ import {
   advanceFullVerification,
   advanceQaRun,
   advanceRemediationRun,
+  advanceRunSummary,
 } from './orchestrator.js'
 import type { AuditAdapter } from './audit.js'
 import type { AutoFixAdapter } from './autofix.js'
@@ -88,13 +89,7 @@ export class DevHarnessRuntime extends Service {
       this.ctx,
       this.requiredSkills,
       invocation,
-      adapter === undefined
-        && autoFixAdapter === undefined
-        && fullVerificationAdapter === undefined
-        && qaAdapters.length === 0
-        && finalReconciliationAdapter === undefined
-        ? undefined
-        : (state, signal) => {
+      (state, signal) => {
             if (['PREFLIGHT', 'AUDIT'].includes(state.phase)) {
               if (adapter === undefined) return Promise.resolve(state)
               return advanceAuditRun({
@@ -139,6 +134,9 @@ export class DevHarnessRuntime extends Service {
               return advanceQaRun({ cwd: state.repo.worktreeRoot, runId: state.runId, signal, adapters: qaAdapters })
             }
             if (state.phase === 'FINAL_RECONCILE') {
+              if (state.finalReconciliation?.executionStatus === 'COMPLETED') {
+                return advanceRunSummary({ cwd: state.repo.worktreeRoot, runId: state.runId, signal })
+              }
               if (finalReconciliationAdapter === undefined) return Promise.resolve(state)
               return advanceFinalReconciliation({
                 cwd: state.repo.worktreeRoot,
@@ -147,8 +145,11 @@ export class DevHarnessRuntime extends Service {
                 adapter: finalReconciliationAdapter,
               })
             }
+            if (state.phase === 'REPORT') {
+              return advanceRunSummary({ cwd: state.repo.worktreeRoot, runId: state.runId, signal })
+            }
             return Promise.resolve(state)
-          },
+      },
     )
   }
 

@@ -24,6 +24,7 @@ import {
   type AutoFixAuthorization,
   type RunAuthorization,
 } from './authorization.js'
+import { assertRunSummaryMatchesState, validateRunSummary, type RunSummary } from './report.js'
 
 const execFile = promisify(execFileCallback)
 const MAX_GIT_OUTPUT = 64 * 1024 * 1024
@@ -31,7 +32,7 @@ const RUN_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/u
 const LOCKFILE_CANDIDATES = ['pnpm-lock.yaml', 'package-lock.json', 'yarn.lock'] as const
 const CONTEXT_FILES = ['README.md', 'AGENTS.md', 'ARCHITECTURE.md', 'HARNESS.md'] as const
 
-export const RUN_STATE_SCHEMA_VERSION = 4 as const
+export const RUN_STATE_SCHEMA_VERSION = 5 as const
 export const MAX_QA_ATTEMPTS = 3 as const
 
 export const PHASES = [
@@ -343,6 +344,7 @@ export interface RunState {
   finalAuditRunId?: string
   finalReconciliationLease?: FinalReconciliationLease
   finalReconciliation?: FinalReconciliationRef
+  summary?: RunSummary
   blocker?: RunBlocker
 }
 
@@ -976,6 +978,7 @@ function parseRunState(value: unknown): RunState {
           }),
         }
       })()
+  const summary = value.summary === undefined ? undefined : validateRunSummary(value.summary, runId)
   const auditLeaseRecord = value.auditLease
   const auditLease = auditLeaseRecord === undefined
     ? undefined
@@ -1123,7 +1126,7 @@ function parseRunState(value: unknown): RunState {
     new Set(commits.map(commit => commit.sha)).size !== commits.length
     || new Set(commits.map(commit => commit.autoFixRunId)).size !== commits.length
   ) throw new Error('commits must have unique sha and autoFixRunId values')
-  return {
+  const parsed: RunState = {
     schemaVersion: RUN_STATE_SCHEMA_VERSION,
     revision: requireInteger(value, 'revision'),
     runId,
@@ -1172,10 +1175,13 @@ function parseRunState(value: unknown): RunState {
     ...optionalString(value, 'finalAuditRunId') === undefined ? {} : { finalAuditRunId: optionalString(value, 'finalAuditRunId') },
     ...(finalReconciliationLease === undefined ? {} : { finalReconciliationLease }),
     ...(finalReconciliation === undefined ? {} : { finalReconciliation }),
+    ...(summary === undefined ? {} : { summary }),
     ...parseOptionalRef(value, 'blocker', ['code', 'message']) === undefined
       ? {}
       : { blocker: parseOptionalRef(value, 'blocker', ['code', 'message']) as unknown as RunBlocker },
   }
+  if (parsed.summary !== undefined) assertRunSummaryMatchesState(parsed.summary, parsed)
+  return parsed
 }
 
 async function readStateFile(statePath: string): Promise<RunState> {

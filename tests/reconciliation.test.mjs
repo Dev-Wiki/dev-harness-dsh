@@ -191,6 +191,17 @@ test('resumes one fresh reconciliation and accepts only authoritative original F
     assert.equal(starts, 1)
     assert.equal(resumes, 1)
     assert.deepEqual(await Plugin.advanceFinalReconciliation({ cwd, runId: initial.runId, adapter, signal: new AbortController().signal }), completed)
+    const done = await Plugin.advanceRunSummary({
+      cwd,
+      runId: initial.runId,
+      signal: new AbortController().signal,
+      now: new Date('2026-08-20T12:05:00.000Z'),
+    })
+    assert.equal(done.phase, 'DONE')
+    assert.equal(done.status, 'DONE')
+    assert.equal(done.summary.overallStatus, 'DONE')
+    assert.equal(done.summary.audit.runId, completed.auditRunId)
+    assert.equal(done.summary.finalReconciliation.freshSnapshotRef, completed.finalReconciliation.freshSnapshotRef)
   } finally {
     await rm(cwd, { recursive: true, force: true })
   }
