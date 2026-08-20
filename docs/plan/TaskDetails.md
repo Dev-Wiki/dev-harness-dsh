@@ -2,7 +2,7 @@
 
 > 本文档是 [Dashboard.md](Dashboard.md) 的执行层补充。产品边界与验收口径以 [MVP 需求](../product/REQUIREMENTS.md) 为准。
 >
-> **当前主题**：dev-harness-dsh MVP。Task V0、K1、K2、K3、K4 已完成，Task S1 开发中；其他任务未经实现和验证证据不得标记完成。
+> **当前主题**：dev-harness-dsh MVP。Task V0、K1、K2、K3、K4、S1 已完成，Task S2 开发中；其他任务未经实现和验证证据不得标记完成。
 
 <a id="task-v0"></a>
 ## 0. 前置调研：DSH 集成面与工具链基线（Task V0）
@@ -218,7 +218,7 @@
 ### Task S1：Full Verification
 
 - **优先级**：🟡 P1
-- **状态**：🚧 开发中
+- **状态**：✅ 已完成
 - **估时**：K4 完成后评估
 - **依赖**：Task K4；目标项目具有已确认的 `harness:full`
 
@@ -229,10 +229,19 @@
 - 区分 PASS、失败、入口缺失和环境不可用；
 - 将结果与实际下游运行和仓库快照关联。
 
-**预计文件**：
+**实现文件**：
 
+- Create: `src/verification.ts` — canonical command、snapshot 和版本化结果合同；
 - Modify: `src/orchestrator.ts` — FULL_VERIFY 阶段；
-- Test: `tests/orchestrator.test.ts` — 成功、失败、缺失和漂移场景。
+- Test: `tests/verification-contract.test.mjs`、`tests/verification.test.mjs`、`tests/orchestrator.test.mjs` — 成功、失败、缺失、环境、恢复和漂移场景。
+
+**完成证据（2026-08-20）**：
+
+- Full Verification Adapter 请求只接受 HARNESS 已确认的 `npm run harness:full`，不重新发现或替换命令；Observation 绑定实际 orchestration/verification Run、HEAD、branch、workspace fingerprint 与稳定 snapshot；
+- RUNNING checkpoint 可用原 Run/ref/revision 恢复；Adapter 调用前持久化 OPEN lease，写前崩溃可幂等 start，PASS 终态重复 resume 不会重跑；
+- PASS、命令 FAIL、ENTRY_MISSING、ENVIRONMENT_UNAVAILABLE、EXECUTION_FAILED 和 CANCELLED 分别传播，无法执行或缺失入口不会冒充 PASS；
+- Plugin 在执行前后独立捕获真实 Git boundary，任何 tracked/staged/untracked 副作用均拒绝并保留 lease；存在未完成 confirmed Auto Fix Finding 时禁止进入验证；
+- Human `/harness-resume` 从 REMEDIATE 无待修复项时进入 FULL_VERIFY；49 个生产自动化用例及 `npm run verify` PASS。
 
 ---
 
@@ -240,7 +249,7 @@
 ### Task S2：QA Adapter 与失败闭环
 
 - **优先级**：🟡 P1
-- **状态**：📋 规划中
+- **状态**：🚧 开发中
 - **估时**：S1 完成后评估
 - **依赖**：Task S1；V0 确认的 Agent / 外部 Skill 调度能力
 

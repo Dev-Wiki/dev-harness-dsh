@@ -27,9 +27,9 @@
 ## 1. 项目上下文速查
 
 - **语言/框架**: TypeScript ES modules，Cordis 4.0.1 Plugin，DeepSeek Harness 0.1.0-rc.8，Schemastery 3.18.1，Node.js 22.19+
-- **架构模式**: 生产 Cordis Service、Human Command、不可变 Run Authorization、原子 Run State、版本化 Audit/Auto Fix Adapter、可恢复 Orchestrator 与 Finding Router 分层实现；V0 fixture 保留为 rc.8 兼容性证明
+- **架构模式**: 生产 Cordis Service、Human Command、不可变 Run Authorization、原子 Run State、版本化 Audit/Auto Fix/Full Verification Adapter 与可恢复 Orchestrator 分层实现；V0 fixture 保留为 rc.8 兼容性证明
 - **核心入口**: src/index.ts 的 named Cordis plugin exports 与 DevHarnessRuntime service
-- **核心调用链**: Human Command 先做 Skill preflight，再依 phase 启动/恢复 Audit 或授权模式的 Auto Fix Adapter；Plugin 在 OPEN mutation lease 内独立核对 Git 输出或下游提交证据，串行推进当前 confirmed Finding
+- **核心调用链**: Human Command 先做 Skill preflight，再依 phase 启动/恢复 Audit、授权 Auto Fix 或 canonical Full Verification；Plugin 独立核对 Git 输出/提交/只读验证 boundary 并持久化权威下游引用
 - **版本识别依据**: 目标版本 dsh-v0.1.0-rc.8 / commit 141eb6fef83422698aef7a981029e843e8161534；生产依赖图由根 pnpm-lock.yaml 固定
 
 ## 1b. 文件信任等级
@@ -60,7 +60,7 @@ Plugin owns orchestration；Skill owns semantics。需求、计划、实现证�
 
 ## 5. 高风险文件标注
 
-依赖版本、bundle patch、Plugin/Adapter 生命周期、Run Authorization、Git private dir、Audit/Auto Fix mutation lease、commit boundary、原子状态与 workspace checkpoint 属于高风险边界
+依赖版本、bundle patch、Plugin/Adapter 生命周期、Run authorization、Git private dir、mutation lease、commit/verification boundary、原子状态与 workspace checkpoint 属于高风险边界
 
 ## 6. 新增功能的一般流程
 
@@ -80,7 +80,7 @@ Human Command 生命周期由 Session 的 command/run 与 command/done 记录；
 
 ## 10. 提问与探索建议
 
-先读 Dashboard、HARNESS 与 DSH_API_BASELINE，再沿 src/index.ts、authorization/audit/autofix/orchestrator/router/state 和对应 tests 探索；Adapter 不直接绑定下游 runtime CLI 外壳
+先读 Dashboard、HARNESS 与 DSH_API_BASELINE，再沿 src/index.ts、authorization/audit/autofix/verification/orchestrator/state 和对应 tests 探索；Adapter 不直接绑定下游 runtime CLI 外壳
 
 ## 11. 自动识别候选
 
@@ -92,7 +92,7 @@ Human Command 生命周期由 Session 的 command/run 与 command/done 记录；
 
 ## 12. 需人工确认
 
-- S1 尚需把已确认 harness:full 入口纳入可恢复编排并绑定实际验证 snapshot
+- S2 尚需固定 QA Adapter 选择、权威结果、QaFinding 和有上限失败重试合同
 - 外部 QA Skill 协议尚未验证；S2 在验证 Adapter 前只声明 manual checklist fallback
 
 ## 13. 代码风格示例（仓库抽样）
@@ -104,8 +104,8 @@ Human Command 生命周期由 Session 的 command/run 与 command/done 记录；
   - 结构性首行（截断）：`const AUDIT_RUN_ID = /^[A-Za-z0-9._-]+$/u`
 - `src/autofix.ts`
   - 结构性首行（截断）：`export const AUTO_FIX_CONTRACT_VERSION = 1 as const`
-- `src/index.ts`
-  - 结构性首行（截断）：`export * from './commands.js'`
+- `src/verification.ts`
+  - 结构性首行（截断）：`export const FULL_VERIFICATION_CONTRACT_VERSION = 1 as const`
 - `src/orchestrator.ts`
   - 结构性首行（截断）：`export class OrchestratorError extends Error`
 

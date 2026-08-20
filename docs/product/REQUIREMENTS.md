@@ -349,7 +349,7 @@ Plugin 不直接修改 `<docs-root>/audit/Findings.md`；resolved、remaining、
 - K2 已建立版本化 Audit Adapter、OPEN mutation lease、精确 workspace checkpoint 与 Finding Router；只有当前 Snapshot 下、cross-module 已完成且带 typed handoff 的 confirmed Finding 会被路由，state 只保存 Audit/Finding/artifact 引用和输出哈希；
 - K3 已建立 fix-only Auto Fix Adapter、逐 Finding 串行队列、权威 CompletionStatus、residual-risk/blocker 引用与中断恢复；Plugin state 不复制下游假设或验证正文；
 - K4 已建立不可变 `fix-only` / `commit-each` Run 授权；commit 只由下游 Auto Fix + Git Workflow 产生，Plugin 独立核对 Git 对象、parent、路径和 post-commit 工作区后原子接纳，不执行第二次提交；
-- 生产 build / test / quick / bugfix / full 脚本已建立并通过本机验证；S1 仍负责把 `harness:full` 纳入编排状态与失败传播；
+- S1 已把已确认的 `npm run harness:full` 纳入版本化 Adapter 与可恢复编排；结果绑定实际 Run/snapshot/Git boundary，PASS、FAIL、入口缺失、环境不可用和执行器失败分别传播；
 - 当前没有已验证的外部 QA Skill 协议；S2 在发现并验证更高优先级 Adapter 前必须使用 manual checklist fallback，结果不得标为 PASS；
 - fixture 的 TypeScript typecheck/build、Oxlint、测试、pack dry-run 和 rc.8 profile 组合已运行通过。
 
