@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  production:
+    name: Production verify (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.19.0', '24.x']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Run canonical full verification (HARNESS.md)
+        run: npm run harness:full
+
+  fixture:
+    name: V0 fixture verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+          cache: pnpm
+          cache-dependency-path: experiments/v0-minimal-plugin/pnpm-lock.yaml
+      - name: Install fixture dependencies
+        run: pnpm --dir experiments/v0-minimal-plugin install --frozen-lockfile --ignore-scripts
+      - name: Run V0 fixture verification (HARNESS.md)
+        run: npm --prefix experiments/v0-minimal-plugin run verify
