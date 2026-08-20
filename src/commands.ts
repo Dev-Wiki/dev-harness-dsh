@@ -2,6 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 
 import type { DevHarnessRuntime } from './index.js'
+import { AUTO_FIX_AUTHORIZATIONS, type AutoFixAuthorization } from './authorization.js'
 import { SkillPreflightError, assertRequiredSkills } from './skills.js'
 import {
   RunStateError,
@@ -31,6 +32,7 @@ export function registerCommands(ctx: Context, runtime: DevHarnessRuntime): void
   ctx.commands.register({
     name: 'harness-run',
     description: 'Start a recoverable dev-harness run in this workspace.',
+    input: { hint: '[fix-only|commit-each]' },
     handler: invocation => settleCommand(() => runtime.run(invocation)),
   })
   ctx.commands.register({
@@ -53,7 +55,7 @@ export async function runCommand(
   invocation: CommandInvocation,
   advance?: (state: RunState, signal: AbortSignal) => Promise<RunState>,
 ): Promise<CommandResult> {
-  requireNoArgs(invocation.rawInput, 'harness-run')
+  const authorization = parseRunAuthorization(invocation.rawInput)
   const cwd = requireCwd(invocation)
   await assertRequiredSkills(ctx, {
     cwd,
@@ -61,7 +63,7 @@ export async function runCommand(
     signal: invocation.signal,
     required: requiredSkills,
   })
-  const state = await createRun({ cwd })
+  const state = await createRun({ cwd, authorization })
   const preflight = await updateRun({
     cwd,
     runId: state.runId,
@@ -152,8 +154,12 @@ function requireCwd(invocation: CommandInvocation): string {
   return cwd
 }
 
-function requireNoArgs(rawInput: string, command: string): void {
-  if (rawInput.trim() !== '') throw new CommandInputError(`/${command} does not accept arguments`)
+function parseRunAuthorization(rawInput: string): AutoFixAuthorization {
+  const value = optionalOneArg(rawInput, 'harness-run') ?? 'fix-only'
+  if (!(AUTO_FIX_AUTHORIZATIONS as readonly string[]).includes(value)) {
+    throw new CommandInputError('/harness-run authorization must be fix-only or commit-each')
+  }
+  return value as AutoFixAuthorization
 }
 
 function requireOneArg(rawInput: string, command: string): string {
@@ -184,6 +190,7 @@ function success(state: RunState): CommandResult {
       revision: state.revision,
       phase: state.phase,
       status: state.status,
+      authorization: state.authorization,
     }),
   }
 }

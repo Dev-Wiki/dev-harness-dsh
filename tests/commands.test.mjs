@@ -166,6 +166,28 @@ test('missing and incomplete Skill catalogs fail closed before state creation', 
   }
 })
 
+test('records explicit commit-each authorization and refuses resume-time expansion or downgrade', async () => {
+  const harness = await createHarness()
+  try {
+    const started = await execute(harness, '/harness-run commit-each')
+    const view = JSON.parse(started.result.text)
+    assert.equal(view.authorization.autoFix, 'commit-each')
+    const state = await Plugin.loadRun(harness.cwd, view.runId)
+    assert.equal(state.authorization.autoFix, 'commit-each')
+    await assert.rejects(Plugin.updateRun({
+      cwd: harness.cwd,
+      runId: state.runId,
+      expectedRevision: state.revision,
+      mutate(next) {
+        next.authorization = Plugin.createRunAuthorization('fix-only')
+      },
+    }), error => error.code === 'INVALID_TRANSITION' && /authorization is immutable/u.test(error.message))
+    assert.equal((await Plugin.loadRun(harness.cwd, view.runId)).authorization.autoFix, 'commit-each')
+  } finally {
+    await harness.dispose()
+  }
+})
+
 test('input, cwd, cancellation, and fiber disposal boundaries are fail closed', async () => {
   const harness = await createHarness()
   try {

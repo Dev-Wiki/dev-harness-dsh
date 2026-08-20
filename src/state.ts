@@ -18,13 +18,20 @@ import cordisPackage from '@deepseek-ai/cordis/package.json' with { type: 'json'
 import commandsPackage from '@deepseek-ai/dsh-commands/package.json' with { type: 'json' }
 import skillPackage from '@deepseek-ai/dsh-skill/package.json' with { type: 'json' }
 
+import {
+  assertRunAuthorization,
+  createRunAuthorization,
+  type AutoFixAuthorization,
+  type RunAuthorization,
+} from './authorization.js'
+
 const execFile = promisify(execFileCallback)
 const MAX_GIT_OUTPUT = 64 * 1024 * 1024
 const RUN_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/u
 const LOCKFILE_CANDIDATES = ['pnpm-lock.yaml', 'package-lock.json', 'yarn.lock'] as const
 const CONTEXT_FILES = ['README.md', 'AGENTS.md', 'ARCHITECTURE.md', 'HARNESS.md'] as const
 
-export const RUN_STATE_SCHEMA_VERSION = 1 as const
+export const RUN_STATE_SCHEMA_VERSION = 2 as const
 
 export const PHASES = [
   'INIT',
@@ -214,6 +221,7 @@ export interface RunState {
   repo: RepositoryIdentity
   contextFingerprint: string
   dependencies: DependencySnapshot
+  authorization: RunAuthorization
   phase: Phase
   status: RunStatus
   createdAt: string
@@ -269,6 +277,7 @@ export interface CaptureEnvironmentOptions {
 export interface CreateRunOptions extends CaptureEnvironmentOptions {
   cwd: string
   runId?: string
+  authorization?: AutoFixAuthorization
   now?: Date
 }
 
@@ -650,6 +659,7 @@ function parseRunState(value: unknown): RunState {
   assertRunId(runId)
   const repo = requireRecord(value, 'repo')
   const dependencies = requireRecord(value, 'dependencies')
+  assertRunAuthorization(value.authorization)
   const packages = requireRecord(dependencies, 'packages')
   const phase = requireString(value, 'phase')
   const status = requireString(value, 'status')
@@ -804,6 +814,7 @@ function parseRunState(value: unknown): RunState {
         return [name, version]
       })),
     },
+    authorization: structuredClone(value.authorization),
     phase: phase as Phase,
     status: status as RunStatus,
     createdAt,
@@ -958,6 +969,7 @@ export async function createRun(options: CreateRunOptions): Promise<RunState> {
       revision: 0,
       runId,
       ...environment,
+      authorization: createRunAuthorization(options.authorization),
       phase: 'INIT',
       status: 'RUNNING',
       createdAt: timestamp,
@@ -978,7 +990,15 @@ export async function createRun(options: CreateRunOptions): Promise<RunState> {
 }
 
 function assertImmutable(previous: RunState, next: RunState): void {
-  const immutable = ['schemaVersion', 'runId', 'repo', 'contextFingerprint', 'dependencies', 'createdAt'] as const
+  const immutable = [
+    'schemaVersion',
+    'runId',
+    'repo',
+    'contextFingerprint',
+    'dependencies',
+    'authorization',
+    'createdAt',
+  ] as const
   for (const key of immutable) {
     if (JSON.stringify(previous[key]) !== JSON.stringify(next[key])) {
       throw new RunStateError('INVALID_TRANSITION', `${key} is immutable`)
