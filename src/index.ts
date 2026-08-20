@@ -16,6 +16,7 @@ export * from './router.js'
 export * from './orchestrator.js'
 export * from './skills.js'
 export * from './state.js'
+export * from './verification.js'
 
 export const name = 'dev-harness-dsh'
 export const inject = ['commands', 'skills']

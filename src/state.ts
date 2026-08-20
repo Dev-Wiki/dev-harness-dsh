@@ -174,9 +174,24 @@ export interface CommitRef {
 }
 
 export interface VerificationRef {
-  status: string
-  runRef?: string
-  snapshotRef?: string
+  verificationRunId: string
+  executionStatus: string
+  status?: string
+  revision: number
+  command: string
+  runRef: string
+  snapshotRef: string
+  workspaceFingerprint: string
+  evidenceRef?: string
+}
+
+export interface FullVerificationLease {
+  verificationRunId: string
+  adapterName: string
+  snapshotRef: string
+  beforeFingerprint: string
+  beforeChangedPaths: Record<string, string>
+  status: 'OPEN'
 }
 
 export interface QaRunRef {
@@ -240,6 +255,7 @@ export interface RunState {
   autoFixCheckpoint?: AutoFixWorkspaceCheckpoint
   fixRuns: AutoFixRunRef[]
   commits: CommitRef[]
+  fullVerificationLease?: FullVerificationLease
   fullVerification?: VerificationRef
   qa?: QaRunRef
   finalAuditRunId?: string
@@ -699,6 +715,43 @@ function parseRunState(value: unknown): RunState {
             : { runRef: optionalString(qaRecord, 'runRef') },
         }
       })()
+  const fullVerificationLeaseRecord = value.fullVerificationLease
+  const fullVerificationLease = fullVerificationLeaseRecord === undefined
+    ? undefined
+    : (() => {
+        if (!isRecord(fullVerificationLeaseRecord) || fullVerificationLeaseRecord.status !== 'OPEN') {
+          throw new Error('fullVerificationLease must be an OPEN lease object')
+        }
+        return {
+          verificationRunId: requireString(fullVerificationLeaseRecord, 'verificationRunId'),
+          adapterName: requireString(fullVerificationLeaseRecord, 'adapterName'),
+          snapshotRef: requireString(fullVerificationLeaseRecord, 'snapshotRef'),
+          beforeFingerprint: requireString(fullVerificationLeaseRecord, 'beforeFingerprint'),
+          beforeChangedPaths: parseStringRecord(fullVerificationLeaseRecord, 'beforeChangedPaths'),
+          status: 'OPEN' as const,
+        }
+      })()
+  const fullVerificationRecord = value.fullVerification
+  const fullVerification = fullVerificationRecord === undefined
+    ? undefined
+    : (() => {
+        if (!isRecord(fullVerificationRecord)) throw new Error('fullVerification must be an object')
+        return {
+          verificationRunId: requireString(fullVerificationRecord, 'verificationRunId'),
+          executionStatus: requireString(fullVerificationRecord, 'executionStatus'),
+          ...(optionalString(fullVerificationRecord, 'status') === undefined
+            ? {}
+            : { status: optionalString(fullVerificationRecord, 'status') }),
+          revision: requireInteger(fullVerificationRecord, 'revision'),
+          command: requireString(fullVerificationRecord, 'command'),
+          runRef: requireString(fullVerificationRecord, 'runRef'),
+          snapshotRef: requireString(fullVerificationRecord, 'snapshotRef'),
+          workspaceFingerprint: requireString(fullVerificationRecord, 'workspaceFingerprint'),
+          ...(optionalString(fullVerificationRecord, 'evidenceRef') === undefined
+            ? {}
+            : { evidenceRef: optionalString(fullVerificationRecord, 'evidenceRef') }),
+        }
+      })()
   const auditLeaseRecord = value.auditLease
   const auditLease = auditLeaseRecord === undefined
     ? undefined
@@ -885,9 +938,8 @@ function parseRunState(value: unknown): RunState {
     ...(autoFixCheckpoint === undefined ? {} : { autoFixCheckpoint }),
     fixRuns,
     commits,
-    ...parseOptionalRef(value, 'fullVerification', ['status'], ['runRef', 'snapshotRef']) === undefined
-      ? {}
-      : { fullVerification: parseOptionalRef(value, 'fullVerification', ['status'], ['runRef', 'snapshotRef']) as unknown as VerificationRef },
+    ...(fullVerificationLease === undefined ? {} : { fullVerificationLease }),
+    ...(fullVerification === undefined ? {} : { fullVerification }),
     ...(qa === undefined ? {} : { qa }),
     ...optionalString(value, 'finalAuditRunId') === undefined ? {} : { finalAuditRunId: optionalString(value, 'finalAuditRunId') },
     ...parseOptionalRef(value, 'blocker', ['code', 'message']) === undefined
