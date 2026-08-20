@@ -1,0 +1,4 @@
+- insert:
+    - id: dev-harness-dsh
+      name: 'dev-harness-dsh'
+      config: {}

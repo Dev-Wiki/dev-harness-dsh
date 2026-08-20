@@ -1,0 +1,61 @@
+{
+  "name": "dev-harness-dsh",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Recoverable dev-harness orchestration for DeepSeek Harness.",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/**/*.js",
+    "lib/**/*.d.ts",
+    "cordis.patch.yml"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src tests",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "pack:check": "npm pack --dry-run",
+    "verify": "npm run typecheck && npm run lint && npm test && npm run pack:check",
+    "harness:build": "npm run build",
+    "harness:test": "npm test",
+    "harness:quick": "npm run typecheck && npm run lint",
+    "harness:bugfix": "npm test",
+    "harness:full": "npm run verify"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.1",
+    "@deepseek-ai/dsh-commands": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-skill": "0.1.0-rc.8"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-atomic-write": "0.1.0-rc.8",
+    "@deepseek-ai/schemastery": "3.18.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.1",
+    "@deepseek-ai/dsh-commands": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-skill": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-skill-filesystem": "0.1.0-rc.8",
+    "@types/node": "26.2.0",
+    "oxlint": "1.76.0",
+    "typescript": "6.0.3"
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "packageManager": "pnpm@11.1.0"
+}
