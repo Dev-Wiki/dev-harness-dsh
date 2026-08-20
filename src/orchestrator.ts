@@ -1,4 +1,5 @@
 import { lstat } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 
 import {
@@ -8,6 +9,12 @@ import {
   type AuditObservation,
 } from './audit.js'
 import { routeAuditFindings } from './router.js'
+import {
+  AutoFixContractError,
+  validateAutoFixObservation,
+  type AutoFixAdapter,
+  type AutoFixObservation,
+} from './autofix.js'
 import {
   adoptWorktreeBoundary,
   captureWorktreeBoundary,
@@ -173,6 +180,319 @@ export async function advanceAuditRun(options: {
   })
 }
 
+export async function advanceRemediationRun(options: {
+  readonly cwd: string
+  readonly runId: string
+  readonly adapter: AutoFixAdapter
+  readonly signal: AbortSignal
+}): Promise<RunState> {
+  throwIfAborted(options.signal)
+  let state = await loadRun(options.cwd, options.runId)
+  if (!['ROUTE', 'REMEDIATE'].includes(state.phase)) {
+    throw new OrchestratorError(`Remediation cannot advance from phase ${state.phase}`)
+  }
+  if (['PAUSED', 'BLOCKED', 'NEEDS_USER'].includes(state.status)) {
+    state = await updateRun({
+      cwd: options.cwd,
+      runId: state.runId,
+      expectedRevision: state.revision,
+      mutate(next) {
+        next.status = 'RUNNING'
+        delete next.blocker
+      },
+    })
+  }
+  if (['FAILED', 'CANCELLED', 'DONE', 'DONE_WITH_CONCERNS'].includes(state.status)) {
+    throw new OrchestratorError(`Remediation cannot advance a ${state.status} run`)
+  }
+  const finding = nextAutoFixFinding(state)
+  if (finding === undefined) {
+    if (state.phase === 'REMEDIATE' && state.currentFinding === undefined) return state
+    return await updateRun({
+      cwd: options.cwd,
+      runId: state.runId,
+      expectedRevision: state.revision,
+      mutate(next) {
+        next.phase = 'REMEDIATE'
+        delete next.currentFinding
+      },
+    })
+  }
+  if (finding.handoffRef === undefined) {
+    throw new OrchestratorError(`Auto Fix finding ${finding.findingId} has no handoff reference`)
+  }
+  if (
+    state.auditRunId === undefined
+    || state.auditResult === undefined
+    || state.auditResult.status !== 'COMPLETED'
+    || state.auditResult.executionStatus !== 'COMPLETED'
+  ) {
+    throw new OrchestratorError('Remediation requires a completed Audit checkpoint')
+  }
+  const auditRunId = state.auditRunId
+  const auditResult = state.auditResult
+
+  const previousRun = state.fixRuns.find(run => run.findingId === finding.findingId)
+  let before: WorktreeBoundary
+  if (state.autoFixLease === undefined) {
+    await validateResume(state, options.cwd)
+    before = await captureWorktreeBoundary(options.cwd)
+    const autoFixRunId = previousRun?.autoFixRunId ?? stableAutoFixRunId(state.runId, finding.findingId)
+    state = await updateRun({
+      cwd: options.cwd,
+      runId: state.runId,
+      expectedRevision: state.revision,
+      mutate(next) {
+        next.phase = 'REMEDIATE'
+        next.currentFinding = finding.findingId
+        next.autoFixLease = {
+          findingId: finding.findingId,
+          autoFixRunId,
+          adapterName: options.adapter.name,
+          handoffRef: finding.handoffRef!,
+          beforeFingerprint: before.fingerprint,
+          beforeChangedPaths: { ...before.changedPaths },
+          status: 'OPEN',
+        }
+      },
+    })
+  } else {
+    if (state.autoFixLease.adapterName !== options.adapter.name) {
+      throw new OrchestratorError('open Auto Fix mutation lease belongs to another Adapter')
+    }
+    if (
+      state.autoFixLease.findingId !== finding.findingId
+      || state.autoFixLease.handoffRef !== finding.handoffRef
+    ) {
+      throw new OrchestratorError('open Auto Fix mutation lease belongs to another Finding')
+    }
+    before = {
+      worktreeRoot: state.repo.worktreeRoot,
+      fingerprint: state.autoFixLease.beforeFingerprint,
+      changedPaths: state.autoFixLease.beforeChangedPaths,
+    }
+  }
+
+  const lease = state.autoFixLease
+  if (lease === undefined) throw new OrchestratorError('Auto Fix mutation lease was not persisted')
+  const checkpoint = state.autoFixCheckpoint?.findingId === finding.findingId
+    ? state.autoFixCheckpoint
+    : undefined
+  const currentRun = state.fixRuns.find(run => run.findingId === finding.findingId)
+  const workspaceBaseFingerprint = currentRun?.workspaceBaseFingerprint ?? lease.beforeFingerprint
+  const request = {
+    cwd: state.repo.worktreeRoot,
+    orchestrationRunId: state.runId,
+    autoFixRunId: lease.autoFixRunId,
+    findingId: finding.findingId,
+    handoffRef: finding.handoffRef,
+    auditRunId,
+    auditSnapshotRef: auditResult.snapshotRef,
+    findingRegistryRef: auditResult.registryRef,
+    mode: 'fix' as const,
+    expectedHead: state.repo.head,
+    expectedBranch: state.repo.branch,
+    expectedCurrentWorkspaceFingerprint: lease.beforeFingerprint,
+    expectedWorkspaceBaseFingerprint: workspaceBaseFingerprint,
+    signal: options.signal,
+  }
+  throwIfAborted(options.signal)
+  const rawObservation = currentRun === undefined
+    ? await options.adapter.start(request)
+    : await options.adapter.resume({
+        ...request,
+        expectedRevision: currentRun.observationRevision,
+        expectedWorkspaceSnapshotRef: currentRun.workspaceSnapshotRef,
+      })
+  throwIfAborted(options.signal)
+  const observation = validateAutoFixObservation(rawObservation, {
+    runId: lease.autoFixRunId,
+    findingId: finding.findingId,
+    handoffRef: finding.handoffRef,
+    auditRunId,
+    auditSnapshotRef: auditResult.snapshotRef,
+    findingRegistryRef: auditResult.registryRef,
+    repositoryRoot: state.repo.worktreeRoot,
+    baseSha: state.repo.head,
+    branch: state.repo.branch,
+    workspaceFingerprint: workspaceBaseFingerprint,
+  })
+  assertMonotonicAutoFixObservation(currentRun, observation)
+
+  const after = await captureWorktreeBoundary(options.cwd)
+  const changedPaths = diffWorktreeBoundaries(before, after)
+  const baseChangedPaths = checkpoint?.baseChangedPaths ?? lease.beforeChangedPaths
+  assertAutoFixWorkspace(
+    before,
+    after,
+    changedPaths,
+    baseChangedPaths,
+    checkpoint?.outputs ?? [],
+    observation,
+  )
+  state = await adoptWorktreeBoundary({
+    cwd: options.cwd,
+    runId: state.runId,
+    expectedRevision: state.revision,
+    before,
+    boundary: after,
+    acceptedPaths: changedPaths,
+  })
+
+  return await updateRun({
+    cwd: options.cwd,
+    runId: state.runId,
+    expectedRevision: state.revision,
+    mutate(next) {
+      const status = observation.completionStatus ?? observation.executionStatus
+      const reference = {
+        findingId: finding.findingId,
+        autoFixRunId: observation.runId,
+        status,
+        observationRevision: observation.revision,
+        stateDigest: observation.stateDigest,
+        executionRef: observation.executionRef,
+        workspaceSnapshotRef: observation.workspaceSnapshotRef,
+        workspaceBaseFingerprint: observation.workspaceBaseFingerprint,
+        ...(observation.finalVerificationRef === undefined
+          ? {}
+          : { finalVerificationRef: observation.finalVerificationRef }),
+        ...(observation.reviewDiffHash === undefined
+          ? {}
+          : { reviewDiffHash: observation.reviewDiffHash }),
+        ...(observation.residualRiskRef === undefined
+          ? {}
+          : { residualRiskRef: observation.residualRiskRef }),
+      }
+      const runIndex = next.fixRuns.findIndex(run => run.findingId === finding.findingId)
+      if (runIndex === -1) next.fixRuns.push(reference)
+      else next.fixRuns[runIndex] = reference
+      next.autoFixCheckpoint = {
+        findingId: finding.findingId,
+        autoFixRunId: observation.runId,
+        observationRevision: observation.revision,
+        stateDigest: observation.stateDigest,
+        workspaceSnapshotRef: observation.workspaceSnapshotRef,
+        baseChangedPaths: { ...baseChangedPaths },
+        previousFingerprint: before.fingerprint,
+        acceptedFingerprint: after.fingerprint,
+        outputs: observation.changeOutputs.map(output => ({ ...output })),
+      }
+      delete next.autoFixLease
+      delete next.blocker
+      if (observation.executionStatus === 'RUNNING') {
+        next.status = 'PAUSED'
+        next.currentFinding = finding.findingId
+      } else if (observation.executionStatus === 'BLOCKED') {
+        next.status = 'BLOCKED'
+        next.currentFinding = finding.findingId
+        next.blocker = { code: 'AUTO_FIX_BLOCKED', message: observation.blockerRef! }
+      } else if (observation.executionStatus === 'NEEDS_CONTEXT') {
+        next.status = 'NEEDS_USER'
+        next.currentFinding = finding.findingId
+        next.blocker = { code: 'AUTO_FIX_NEEDS_CONTEXT', message: observation.blockerRef! }
+      } else if (observation.executionStatus === 'FAILED') {
+        next.status = 'FAILED'
+        next.currentFinding = finding.findingId
+        next.blocker = { code: 'AUTO_FIX_FAILED', message: observation.executionRef }
+      } else if (observation.executionStatus === 'CANCELLED') {
+        next.status = 'CANCELLED'
+        next.currentFinding = finding.findingId
+      } else {
+        next.status = 'RUNNING'
+        const remaining = next.findings.find(candidate =>
+          candidate.status === 'confirmed'
+          && candidate.route === 'auto-fix'
+          && !next.fixRuns.some(run =>
+            run.findingId === candidate.findingId
+            && ['DONE', 'DONE_WITH_CONCERNS'].includes(run.status)))
+        if (remaining === undefined) delete next.currentFinding
+        else next.currentFinding = remaining.findingId
+      }
+    },
+  })
+}
+
+function nextAutoFixFinding(state: RunState) {
+  const pending = state.findings.filter(finding =>
+    finding.status === 'confirmed'
+    && finding.route === 'auto-fix'
+    && !state.fixRuns.some(run =>
+      run.findingId === finding.findingId
+      && ['DONE', 'DONE_WITH_CONCERNS'].includes(run.status)))
+  return pending.find(finding => finding.findingId === state.currentFinding) ?? pending[0]
+}
+
+function stableAutoFixRunId(orchestrationRunId: string, findingId: string): string {
+  const suffix = createHash('sha256').update(`${orchestrationRunId}\0${findingId}`).digest('hex').slice(0, 16)
+  return `fix-${suffix}`
+}
+
+function assertMonotonicAutoFixObservation(
+  previous: RunState['fixRuns'][number] | undefined,
+  observation: AutoFixObservation,
+): void {
+  if (previous === undefined) return
+  if (observation.runId !== previous.autoFixRunId) {
+    throw new AutoFixContractError('Auto Fix Adapter changed run identity')
+  }
+  if (observation.revision < previous.observationRevision) {
+    throw new AutoFixContractError('Auto Fix Adapter revision moved backwards')
+  }
+  if (
+    observation.revision === previous.observationRevision
+    && observation.stateDigest !== previous.stateDigest
+  ) {
+    throw new AutoFixContractError('Auto Fix Adapter changed state at the same revision')
+  }
+  if (
+    observation.revision === previous.observationRevision
+    && (observation.completionStatus ?? observation.executionStatus) !== previous.status
+  ) {
+    throw new AutoFixContractError('Auto Fix Adapter changed status at the same revision')
+  }
+  if (observation.workspaceSnapshotRef !== previous.workspaceSnapshotRef) {
+    throw new AutoFixContractError('Auto Fix Adapter changed workspace snapshot during resume')
+  }
+}
+
+function assertAutoFixWorkspace(
+  before: WorktreeBoundary,
+  after: WorktreeBoundary,
+  changedPaths: readonly string[],
+  baseChangedPaths: Readonly<Record<string, string>>,
+  previousOutputs: readonly { path: string; fingerprint: string }[],
+  observation: AutoFixObservation,
+): void {
+  const outputMap = new Map(observation.changeOutputs.map(output => [output.path, output.fingerprint]))
+  for (const path of changedPaths) {
+    if (outputMap.get(path) !== after.changedPaths[path]) {
+      throw new AutoFixContractError(`Auto Fix mutated an undeclared path: ${path}`)
+    }
+  }
+  for (const [path, fingerprint] of outputMap) {
+    if (baseChangedPaths[path] !== undefined) {
+      throw new AutoFixContractError(`Auto Fix claimed a preexisting changed path: ${path}`)
+    }
+    if (after.changedPaths[path] !== fingerprint) {
+      throw new AutoFixContractError(`Auto Fix output fingerprint mismatch: ${path}`)
+    }
+  }
+  for (const previous of previousOutputs) {
+    if (outputMap.get(previous.path) !== after.changedPaths[previous.path]) {
+      throw new AutoFixContractError(`Auto Fix dropped ownership of a prior output: ${previous.path}`)
+    }
+  }
+  for (const [path, fingerprint] of Object.entries(baseChangedPaths)) {
+    if (after.changedPaths[path] !== fingerprint) {
+      throw new AutoFixContractError(`Auto Fix altered a preexisting changed path: ${path}`)
+    }
+  }
+  if (before.fingerprint === after.fingerprint && changedPaths.length > 0) {
+    throw new AutoFixContractError('Auto Fix mutation boundary is internally inconsistent')
+  }
+}
+
 function assertMonotonicObservation(state: RunState, observation: AuditObservation): void {
   if (state.auditRunId !== undefined && observation.runId !== state.auditRunId) {
     throw new AuditContractError('Audit Adapter changed run identity')
@@ -250,5 +570,5 @@ async function assertAuditRootDirectory(worktreeRoot: string, auditRoot: string)
 function throwIfAborted(signal: AbortSignal): void {
   if (!signal.aborted) return
   if (signal.reason instanceof Error) throw signal.reason
-  throw new Error(typeof signal.reason === 'string' ? signal.reason : 'Audit orchestration aborted')
+  throw new Error(typeof signal.reason === 'string' ? signal.reason : 'orchestration aborted')
 }

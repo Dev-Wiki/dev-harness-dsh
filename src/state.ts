@@ -125,7 +125,36 @@ export interface AutoFixRunRef {
   findingId: string
   autoFixRunId: string
   status: string
+  observationRevision: number
+  stateDigest: string
+  executionRef: string
+  workspaceSnapshotRef: string
+  workspaceBaseFingerprint: string
+  finalVerificationRef?: string
+  reviewDiffHash?: string
   residualRiskRef?: string
+}
+
+export interface AutoFixMutationLease {
+  findingId: string
+  autoFixRunId: string
+  adapterName: string
+  handoffRef: string
+  beforeFingerprint: string
+  beforeChangedPaths: Record<string, string>
+  status: 'OPEN'
+}
+
+export interface AutoFixWorkspaceCheckpoint {
+  findingId: string
+  autoFixRunId: string
+  observationRevision: number
+  stateDigest: string
+  workspaceSnapshotRef: string
+  baseChangedPaths: Record<string, string>
+  previousFingerprint: string
+  acceptedFingerprint: string
+  outputs: Array<{ path: string; fingerprint: string }>
 }
 
 export interface CommitRef {
@@ -195,6 +224,8 @@ export interface RunState {
   auditCheckpoint?: AuditWorkspaceCheckpoint
   currentFinding?: string
   findings: FindingRouteRef[]
+  autoFixLease?: AutoFixMutationLease
+  autoFixCheckpoint?: AutoFixWorkspaceCheckpoint
   fixRuns: AutoFixRunRef[]
   commits: CommitRef[]
   fullVerification?: VerificationRef
@@ -690,6 +721,65 @@ function parseRunState(value: unknown): RunState {
           }>,
         }
       })()
+  const autoFixLeaseRecord = value.autoFixLease
+  const autoFixLease = autoFixLeaseRecord === undefined
+    ? undefined
+    : (() => {
+        if (!isRecord(autoFixLeaseRecord) || autoFixLeaseRecord.status !== 'OPEN') {
+          throw new Error('autoFixLease must be an OPEN lease object')
+        }
+        return {
+          findingId: requireString(autoFixLeaseRecord, 'findingId'),
+          autoFixRunId: requireString(autoFixLeaseRecord, 'autoFixRunId'),
+          adapterName: requireString(autoFixLeaseRecord, 'adapterName'),
+          handoffRef: requireString(autoFixLeaseRecord, 'handoffRef'),
+          beforeFingerprint: requireString(autoFixLeaseRecord, 'beforeFingerprint'),
+          beforeChangedPaths: parseStringRecord(autoFixLeaseRecord, 'beforeChangedPaths'),
+          status: 'OPEN' as const,
+        }
+      })()
+  const autoFixCheckpointRecord = value.autoFixCheckpoint
+  const autoFixCheckpoint = autoFixCheckpointRecord === undefined
+    ? undefined
+    : (() => {
+        if (!isRecord(autoFixCheckpointRecord)) throw new Error('autoFixCheckpoint must be an object')
+        return {
+          findingId: requireString(autoFixCheckpointRecord, 'findingId'),
+          autoFixRunId: requireString(autoFixCheckpointRecord, 'autoFixRunId'),
+          observationRevision: requireInteger(autoFixCheckpointRecord, 'observationRevision'),
+          stateDigest: requireString(autoFixCheckpointRecord, 'stateDigest'),
+          workspaceSnapshotRef: requireString(autoFixCheckpointRecord, 'workspaceSnapshotRef'),
+          baseChangedPaths: parseStringRecord(autoFixCheckpointRecord, 'baseChangedPaths'),
+          previousFingerprint: requireString(autoFixCheckpointRecord, 'previousFingerprint'),
+          acceptedFingerprint: requireString(autoFixCheckpointRecord, 'acceptedFingerprint'),
+          outputs: parseRefArray(autoFixCheckpointRecord, 'outputs', ['path', 'fingerprint']) as Array<{
+            path: string
+            fingerprint: string
+          }>,
+        }
+      })()
+  const fixRuns = requireArray(value, 'fixRuns').map((entry, index): AutoFixRunRef => {
+    if (!isRecord(entry)) throw new Error(`fixRuns[${index}] must be an object`)
+    return {
+      findingId: requireString(entry, 'findingId'),
+      autoFixRunId: requireString(entry, 'autoFixRunId'),
+      status: requireString(entry, 'status'),
+      observationRevision: requireInteger(entry, 'observationRevision'),
+      stateDigest: requireString(entry, 'stateDigest'),
+      executionRef: requireString(entry, 'executionRef'),
+      workspaceSnapshotRef: requireString(entry, 'workspaceSnapshotRef'),
+      workspaceBaseFingerprint: requireString(entry, 'workspaceBaseFingerprint'),
+      ...(optionalString(entry, 'finalVerificationRef') === undefined
+        ? {}
+        : { finalVerificationRef: optionalString(entry, 'finalVerificationRef') }),
+      ...(optionalString(entry, 'reviewDiffHash') === undefined
+        ? {}
+        : { reviewDiffHash: optionalString(entry, 'reviewDiffHash') }),
+      ...(optionalString(entry, 'residualRiskRef') === undefined
+        ? {}
+        : { residualRiskRef: optionalString(entry, 'residualRiskRef') }),
+    }
+  })
   return {
     schemaVersion: RUN_STATE_SCHEMA_VERSION,
     revision: requireInteger(value, 'revision'),
@@ -724,7 +814,9 @@ function parseRunState(value: unknown): RunState {
     ...(auditCheckpoint === undefined ? {} : { auditCheckpoint }),
     ...optionalString(value, 'currentFinding') === undefined ? {} : { currentFinding: optionalString(value, 'currentFinding') },
     findings: parseRefArray(value, 'findings', ['findingId', 'status', 'route'], ['handoffRef']) as unknown as FindingRouteRef[],
-    fixRuns: parseRefArray(value, 'fixRuns', ['findingId', 'autoFixRunId', 'status'], ['residualRiskRef']) as unknown as AutoFixRunRef[],
+    ...(autoFixLease === undefined ? {} : { autoFixLease }),
+    ...(autoFixCheckpoint === undefined ? {} : { autoFixCheckpoint }),
+    fixRuns,
     commits: parseRefArray(value, 'commits', ['sha'], ['autoFixRunId']) as unknown as CommitRef[],
     ...parseOptionalRef(value, 'fullVerification', ['status'], ['runRef', 'snapshotRef']) === undefined
       ? {}

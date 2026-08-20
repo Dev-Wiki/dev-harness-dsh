@@ -156,6 +156,52 @@ class FixtureAuditAdapter {
   }
 }
 
+class FixtureAutoFixAdapter {
+  name = 'fixture-auto-fix'
+
+  async start(request) {
+    await writeFile(join(request.cwd, 'fixed.txt'), 'fixed by Auto Fix\n')
+    const boundary = await Plugin.captureWorktreeBoundary(request.cwd)
+    return {
+      contractVersion: 1,
+      runId: request.autoFixRunId,
+      findingId: request.findingId,
+      handoffRef: request.handoffRef,
+      auditRunId: request.auditRunId,
+      auditSnapshotRef: request.auditSnapshotRef,
+      findingRegistryRef: request.findingRegistryRef,
+      mode: 'fix',
+      executionStatus: 'COMPLETED',
+      completionStatus: 'DONE',
+      revision: 1,
+      stateDigest: 'a'.repeat(64),
+      executionRef: 'autofix:execution:AUD-001',
+      repositoryRoot: request.cwd,
+      baseSha: request.expectedHead,
+      branch: request.expectedBranch,
+      workspaceSnapshotRef: 'autofix:snapshot:AUD-001',
+      workspaceBaseFingerprint: request.expectedWorkspaceBaseFingerprint,
+      stage: 'report',
+      changedFiles: ['fixed.txt'],
+      changeOutputs: [{ path: 'fixed.txt', fingerprint: boundary.changedPaths['fixed.txt'] }],
+      workspaceVerified: true,
+      quiescent: true,
+      regressionRedRef: 'autofix:red:AUD-001',
+      regressionGreenRef: 'autofix:green:AUD-001',
+      reviewOutcome: 'PASS',
+      reviewEvidenceRef: 'autofix:review:AUD-001',
+      reviewReviewer: 'independent',
+      reviewDiffHash: 'b'.repeat(64),
+      finalVerificationRef: 'autofix:verify:AUD-001',
+      finalVerificationObservedAt: '2026-08-20T12:00:00.000Z',
+      finalVerificationDiffHash: 'b'.repeat(64),
+      commits: [],
+    }
+  }
+
+  async resume() { throw new Error('not reached') }
+}
+
 test('Audit start and resume checkpoints only refs, then routes confirmed defects', async () => {
   const cwd = await repository()
   const ctx = new Context()
@@ -172,6 +218,7 @@ test('Audit start and resume checkpoints only refs, then routes confirmed defect
   }
   const fiber = await ctx.plugin(Plugin)
   const unregister = ctx.devHarness.registerAuditAdapter(new FixtureAuditAdapter())
+  const unregisterAutoFix = ctx.devHarness.registerAutoFixAdapter(new FixtureAutoFixAdapter())
   try {
     const session = ctx.sessions.create(SessionId('audit-command-flow'), { meta: { cwd } })
     const agent = { id: session.id, session }
@@ -205,18 +252,34 @@ test('Audit start and resume checkpoints only refs, then routes confirmed defect
     assert.equal(completed.auditCheckpoint.outputs.length, 4)
     await Plugin.validateResume(completed, cwd)
 
+    const remediatedResult = await ctx.commands.execute(
+      agent,
+      `/harness-resume ${active.runId}`,
+      [],
+      new AbortController().signal,
+    )
+    assert.equal(remediatedResult.result.kind, 'success')
+    const remediated = await Plugin.loadRun(cwd, active.runId)
+    assert.equal(remediated.phase, 'REMEDIATE')
+    assert.equal(remediated.currentFinding, undefined)
+    assert.equal(remediated.fixRuns[0].status, 'DONE')
+    assert.deepEqual(remediated.commits, [])
+    await Plugin.validateResume(remediated, cwd)
+
     const rawState = await readFile(await Plugin.resolveStatePath(cwd, active.runId), 'utf8')
     assert.equal(rawState.includes('handoff:defect-1'), true)
     assert.equal(rawState.includes('Claim'), false)
     assert.equal(rawState.includes('Evidence'), false)
 
     unregister()
+    unregisterAutoFix()
     assert.throws(
       () => ctx.devHarness.advanceAudit(cwd, active.runId, new AbortController().signal),
       /no Audit Adapter/u,
     )
   } finally {
     unregister()
+    unregisterAutoFix()
     await fiber.dispose()
     await ctx.fiber.dispose()
     await rm(cwd, { recursive: true, force: true })

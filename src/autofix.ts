@@ -58,7 +58,8 @@ export interface AutoFixStartRequest {
   readonly mode: 'fix'
   readonly expectedHead: string
   readonly expectedBranch: string
-  readonly expectedWorkspaceFingerprint: string
+  readonly expectedCurrentWorkspaceFingerprint: string
+  readonly expectedWorkspaceBaseFingerprint: string
   readonly signal: AbortSignal
 }
 

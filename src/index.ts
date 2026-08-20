@@ -4,8 +4,9 @@ import type {} from '@deepseek-ai/dsh-skill'
 import z from '@deepseek-ai/schemastery'
 
 import { registerCommands, resumeCommand, runCommand, statusCommand } from './commands.js'
-import { advanceAuditRun } from './orchestrator.js'
+import { advanceAuditRun, advanceRemediationRun } from './orchestrator.js'
 import type { AuditAdapter } from './audit.js'
+import type { AutoFixAdapter } from './autofix.js'
 
 export * from './commands.js'
 export * from './audit.js'
@@ -36,6 +37,7 @@ declare module '@deepseek-ai/cordis' {
 export class DevHarnessRuntime extends Service {
   readonly requiredSkills: readonly string[]
   private auditAdapter?: AuditAdapter
+  private autoFixAdapter?: AutoFixAdapter
 
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'devHarness')
@@ -61,18 +63,34 @@ export class DevHarnessRuntime extends Service {
 
   resume(invocation: import('@deepseek-ai/dsh-commands').CommandInvocation) {
     const adapter = this.auditAdapter
+    const autoFixAdapter = this.autoFixAdapter
     return resumeCommand(
       this.ctx,
       this.requiredSkills,
       invocation,
-      adapter === undefined
+      adapter === undefined && autoFixAdapter === undefined
         ? undefined
-        : (state, signal) => advanceAuditRun({
-            cwd: state.repo.worktreeRoot,
-            runId: state.runId,
-            signal,
-            adapter,
-          }),
+        : (state, signal) => {
+            if (['PREFLIGHT', 'AUDIT'].includes(state.phase)) {
+              if (adapter === undefined) return Promise.resolve(state)
+              return advanceAuditRun({
+                cwd: state.repo.worktreeRoot,
+                runId: state.runId,
+                signal,
+                adapter,
+              })
+            }
+            if (['ROUTE', 'REMEDIATE'].includes(state.phase)) {
+              if (autoFixAdapter === undefined) return Promise.resolve(state)
+              return advanceRemediationRun({
+                cwd: state.repo.worktreeRoot,
+                runId: state.runId,
+                signal,
+                adapter: autoFixAdapter,
+              })
+            }
+            return Promise.resolve(state)
+          },
     )
   }
 
@@ -92,6 +110,20 @@ export class DevHarnessRuntime extends Service {
   advanceAudit(cwd: string, runId: string, signal: AbortSignal) {
     if (this.auditAdapter === undefined) throw new Error('no Audit Adapter is registered')
     return advanceAuditRun({ cwd, runId, signal, adapter: this.auditAdapter })
+  }
+
+  registerAutoFixAdapter(adapter: AutoFixAdapter): () => void {
+    if (this.autoFixAdapter !== undefined) throw new Error('an Auto Fix Adapter is already registered')
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(adapter.name)) throw new TypeError('invalid Auto Fix Adapter name')
+    this.autoFixAdapter = adapter
+    return () => {
+      if (this.autoFixAdapter === adapter) this.autoFixAdapter = undefined
+    }
+  }
+
+  advanceRemediation(cwd: string, runId: string, signal: AbortSignal) {
+    if (this.autoFixAdapter === undefined) throw new Error('no Auto Fix Adapter is registered')
+    return advanceRemediationRun({ cwd, runId, signal, adapter: this.autoFixAdapter })
   }
 }
 
