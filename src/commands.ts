@@ -32,7 +32,7 @@ export function registerCommands(ctx: Context, runtime: DevHarnessRuntime): void
   ctx.commands.register({
     name: 'harness-run',
     description: 'Start a recoverable dev-harness run in this workspace.',
-    input: { hint: '[fix-only|commit-each]' },
+    input: { hint: '[fix-only|commit-each] [qa=<adapter-name>]' },
     handler: invocation => settleCommand(() => runtime.run(invocation)),
   })
   ctx.commands.register({
@@ -55,7 +55,7 @@ export async function runCommand(
   invocation: CommandInvocation,
   advance?: (state: RunState, signal: AbortSignal) => Promise<RunState>,
 ): Promise<CommandResult> {
-  const authorization = parseRunAuthorization(invocation.rawInput)
+  const { authorization, qaPreference } = parseRunOptions(invocation.rawInput)
   const cwd = requireCwd(invocation)
   await assertRequiredSkills(ctx, {
     cwd,
@@ -63,7 +63,7 @@ export async function runCommand(
     signal: invocation.signal,
     required: requiredSkills,
   })
-  const state = await createRun({ cwd, authorization })
+  const state = await createRun({ cwd, authorization, qaPreference })
   const preflight = await updateRun({
     cwd,
     runId: state.runId,
@@ -154,12 +154,29 @@ function requireCwd(invocation: CommandInvocation): string {
   return cwd
 }
 
-function parseRunAuthorization(rawInput: string): AutoFixAuthorization {
-  const value = optionalOneArg(rawInput, 'harness-run') ?? 'fix-only'
-  if (!(AUTO_FIX_AUTHORIZATIONS as readonly string[]).includes(value)) {
-    throw new CommandInputError('/harness-run authorization must be fix-only or commit-each')
+function parseRunOptions(rawInput: string): { authorization: AutoFixAuthorization; qaPreference?: string } {
+  let authorization: AutoFixAuthorization = 'fix-only'
+  let authorizationSeen = false
+  let qaPreference: string | undefined
+  for (const field of rawInput.trim().split(/\s+/u).filter(Boolean)) {
+    if ((AUTO_FIX_AUTHORIZATIONS as readonly string[]).includes(field)) {
+      if (authorizationSeen) throw new CommandInputError('/harness-run accepts one authorization mode')
+      authorization = field as AutoFixAuthorization
+      authorizationSeen = true
+      continue
+    }
+    if (field.startsWith('qa=')) {
+      const name = field.slice(3)
+      if (qaPreference !== undefined) throw new CommandInputError('/harness-run accepts one QA Adapter preference')
+      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(name)) {
+        throw new CommandInputError('/harness-run qa must be a lowercase Adapter name')
+      }
+      qaPreference = name
+      continue
+    }
+    throw new CommandInputError('/harness-run accepts fix-only or commit-each and an optional qa=<adapter-name>')
   }
-  return value as AutoFixAuthorization
+  return { authorization, ...(qaPreference === undefined ? {} : { qaPreference }) }
 }
 
 function requireOneArg(rawInput: string, command: string): string {

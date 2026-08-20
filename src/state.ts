@@ -31,7 +31,8 @@ const RUN_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/u
 const LOCKFILE_CANDIDATES = ['pnpm-lock.yaml', 'package-lock.json', 'yarn.lock'] as const
 const CONTEXT_FILES = ['README.md', 'AGENTS.md', 'ARCHITECTURE.md', 'HARNESS.md'] as const
 
-export const RUN_STATE_SCHEMA_VERSION = 2 as const
+export const RUN_STATE_SCHEMA_VERSION = 3 as const
+export const MAX_QA_ATTEMPTS = 3 as const
 
 export const PHASES = [
   'INIT',
@@ -195,9 +196,56 @@ export interface FullVerificationLease {
 }
 
 export interface QaRunRef {
-  status: string
+  qaRunId: string
   attempt: number
-  runRef?: string
+  adapterName: string
+  adapterKind: string
+  revision: number
+  executionStatus: string
+  resultStatus?: string
+  runRef: string
+  verificationRunId: string
+  verificationSnapshotRef: string
+  workspaceFingerprint: string
+  evidenceRef?: string
+  blockerRef?: string
+  manualChecklist: string[]
+}
+
+export interface QaFindingRef {
+  findingId: string
+  status: 'OPEN' | 'IN_REMEDIATION' | 'RESOLVED' | 'BLOCKED'
+  fingerprint: string
+  symptom: string
+  expected: string
+  steps: string[]
+  environment: string
+  evidenceRef: string
+  qaRunId: string
+  qaAttempt: number
+  adapterName: string
+  qaSnapshotRef: string
+  findingRef: string
+  handoffRef: string
+}
+
+export interface QaState {
+  maxAttempts: number
+  currentAttempt: number
+  runs: QaRunRef[]
+  findings: QaFindingRef[]
+}
+
+export interface QaLease {
+  qaRunId: string
+  attempt: number
+  adapterName: string
+  adapterKind: string
+  verificationRunId: string
+  verificationSnapshotRef: string
+  beforeFingerprint: string
+  beforeChangedPaths: Record<string, string>
+  status: 'OPEN'
 }
 
 export interface RunBlocker {
@@ -241,6 +289,7 @@ export interface RunState {
   contextFingerprint: string
   dependencies: DependencySnapshot
   authorization: RunAuthorization
+  qaPreference?: string
   phase: Phase
   status: RunStatus
   createdAt: string
@@ -257,7 +306,10 @@ export interface RunState {
   commits: CommitRef[]
   fullVerificationLease?: FullVerificationLease
   fullVerification?: VerificationRef
-  qa?: QaRunRef
+  verificationCycle: number
+  fullVerificationHistory: VerificationRef[]
+  qaLease?: QaLease
+  qa: QaState
   finalAuditRunId?: string
   blocker?: RunBlocker
 }
@@ -298,6 +350,7 @@ export interface CreateRunOptions extends CaptureEnvironmentOptions {
   cwd: string
   runId?: string
   authorization?: AutoFixAuthorization
+  qaPreference?: string
   now?: Date
 }
 
@@ -664,6 +717,13 @@ function parseStringRecord(record: Record<string, unknown>, key: string): Record
   }))
 }
 
+function parseStringArray(record: Record<string, unknown>, key: string): string[] {
+  return requireArray(record, key).map((item, index) => {
+    if (typeof item !== 'string' || item.length === 0) throw new Error(`${key}[${index}] must be a non-empty string`)
+    return item
+  })
+}
+
 function parseRefArray(
   record: Record<string, unknown>,
   key: string,
@@ -702,19 +762,65 @@ function parseRunState(value: unknown): RunState {
   if (!Number.isFinite(Date.parse(createdAt)) || !Number.isFinite(Date.parse(updatedAt))) {
     throw new Error('createdAt and updatedAt must be ISO-compatible timestamps')
   }
-  const qaRecord = value.qa
-  const qa = qaRecord === undefined
-    ? undefined
-    : (() => {
-        if (!isRecord(qaRecord)) throw new Error('qa must be an object')
-        return {
-          status: requireString(qaRecord, 'status'),
-          attempt: requireInteger(qaRecord, 'attempt'),
-          ...optionalString(qaRecord, 'runRef') === undefined
-            ? {}
-            : { runRef: optionalString(qaRecord, 'runRef') },
-        }
-      })()
+  const qaRecord = requireRecord(value, 'qa')
+  const qa: QaState = {
+    maxAttempts: requireInteger(qaRecord, 'maxAttempts', 1),
+    currentAttempt: requireInteger(qaRecord, 'currentAttempt'),
+    runs: requireArray(qaRecord, 'runs').map((entry, index): QaRunRef => {
+      if (!isRecord(entry)) throw new Error(`qa.runs[${index}] must be an object`)
+      return {
+        qaRunId: requireString(entry, 'qaRunId'),
+        attempt: requireInteger(entry, 'attempt', 1),
+        adapterName: requireString(entry, 'adapterName'),
+        adapterKind: requireString(entry, 'adapterKind'),
+        revision: requireInteger(entry, 'revision'),
+        executionStatus: requireString(entry, 'executionStatus'),
+        ...(optionalString(entry, 'resultStatus') === undefined
+          ? {}
+          : { resultStatus: optionalString(entry, 'resultStatus') }),
+        runRef: requireString(entry, 'runRef'),
+        verificationRunId: requireString(entry, 'verificationRunId'),
+        verificationSnapshotRef: requireString(entry, 'verificationSnapshotRef'),
+        workspaceFingerprint: requireString(entry, 'workspaceFingerprint'),
+        ...(optionalString(entry, 'evidenceRef') === undefined
+          ? {}
+          : { evidenceRef: optionalString(entry, 'evidenceRef') }),
+        ...(optionalString(entry, 'blockerRef') === undefined
+          ? {}
+          : { blockerRef: optionalString(entry, 'blockerRef') }),
+        manualChecklist: parseStringArray(entry, 'manualChecklist'),
+      }
+    }),
+    findings: requireArray(qaRecord, 'findings').map((entry, index): QaFindingRef => {
+      if (!isRecord(entry)) throw new Error(`qa.findings[${index}] must be an object`)
+      const status = requireString(entry, 'status')
+      if (!['OPEN', 'IN_REMEDIATION', 'RESOLVED', 'BLOCKED'].includes(status)) {
+        throw new Error(`qa.findings[${index}] has unknown status`)
+      }
+      return {
+        findingId: requireString(entry, 'findingId'),
+        status: status as QaFindingRef['status'],
+        fingerprint: requireString(entry, 'fingerprint'),
+        symptom: requireString(entry, 'symptom'),
+        expected: requireString(entry, 'expected'),
+        steps: parseStringArray(entry, 'steps'),
+        environment: requireString(entry, 'environment'),
+        evidenceRef: requireString(entry, 'evidenceRef'),
+        qaRunId: requireString(entry, 'qaRunId'),
+        qaAttempt: requireInteger(entry, 'qaAttempt', 1),
+        adapterName: requireString(entry, 'adapterName'),
+        qaSnapshotRef: requireString(entry, 'qaSnapshotRef'),
+        findingRef: requireString(entry, 'findingRef'),
+        handoffRef: requireString(entry, 'handoffRef'),
+      }
+    }),
+  }
+  if (qa.maxAttempts !== MAX_QA_ATTEMPTS) throw new Error(`qa.maxAttempts must equal ${MAX_QA_ATTEMPTS}`)
+  if (qa.currentAttempt > qa.maxAttempts) throw new Error('qa.currentAttempt exceeds maxAttempts')
+  if (new Set(qa.runs.map(run => run.attempt)).size !== qa.runs.length) throw new Error('QA attempts must be unique')
+  if (new Set(qa.findings.map(finding => finding.findingId)).size !== qa.findings.length) {
+    throw new Error('QA finding ids must be unique')
+  }
   const fullVerificationLeaseRecord = value.fullVerificationLease
   const fullVerificationLease = fullVerificationLeaseRecord === undefined
     ? undefined
@@ -750,6 +856,39 @@ function parseRunState(value: unknown): RunState {
           ...(optionalString(fullVerificationRecord, 'evidenceRef') === undefined
             ? {}
             : { evidenceRef: optionalString(fullVerificationRecord, 'evidenceRef') }),
+        }
+      })()
+  const fullVerificationHistory = requireArray(value, 'fullVerificationHistory').map((entry, index): VerificationRef => {
+    if (!isRecord(entry)) throw new Error(`fullVerificationHistory[${index}] must be an object`)
+    return {
+      verificationRunId: requireString(entry, 'verificationRunId'),
+      executionStatus: requireString(entry, 'executionStatus'),
+      ...(optionalString(entry, 'status') === undefined ? {} : { status: optionalString(entry, 'status') }),
+      revision: requireInteger(entry, 'revision'),
+      command: requireString(entry, 'command'),
+      runRef: requireString(entry, 'runRef'),
+      snapshotRef: requireString(entry, 'snapshotRef'),
+      workspaceFingerprint: requireString(entry, 'workspaceFingerprint'),
+      ...(optionalString(entry, 'evidenceRef') === undefined ? {} : { evidenceRef: optionalString(entry, 'evidenceRef') }),
+    }
+  })
+  const qaLeaseRecord = value.qaLease
+  const qaLease = qaLeaseRecord === undefined
+    ? undefined
+    : (() => {
+        if (!isRecord(qaLeaseRecord) || qaLeaseRecord.status !== 'OPEN') {
+          throw new Error('qaLease must be an OPEN lease object')
+        }
+        return {
+          qaRunId: requireString(qaLeaseRecord, 'qaRunId'),
+          attempt: requireInteger(qaLeaseRecord, 'attempt', 1),
+          adapterName: requireString(qaLeaseRecord, 'adapterName'),
+          adapterKind: requireString(qaLeaseRecord, 'adapterKind'),
+          verificationRunId: requireString(qaLeaseRecord, 'verificationRunId'),
+          verificationSnapshotRef: requireString(qaLeaseRecord, 'verificationSnapshotRef'),
+          beforeFingerprint: requireString(qaLeaseRecord, 'beforeFingerprint'),
+          beforeChangedPaths: parseStringRecord(qaLeaseRecord, 'beforeChangedPaths'),
+          status: 'OPEN' as const,
         }
       })()
   const auditLeaseRecord = value.auditLease
@@ -924,6 +1063,7 @@ function parseRunState(value: unknown): RunState {
       })),
     },
     authorization: structuredClone(value.authorization),
+    ...optionalString(value, 'qaPreference') === undefined ? {} : { qaPreference: optionalString(value, 'qaPreference') },
     phase: phase as Phase,
     status: status as RunStatus,
     createdAt,
@@ -940,7 +1080,10 @@ function parseRunState(value: unknown): RunState {
     commits,
     ...(fullVerificationLease === undefined ? {} : { fullVerificationLease }),
     ...(fullVerification === undefined ? {} : { fullVerification }),
-    ...(qa === undefined ? {} : { qa }),
+    verificationCycle: requireInteger(value, 'verificationCycle'),
+    fullVerificationHistory,
+    ...(qaLease === undefined ? {} : { qaLease }),
+    qa,
     ...optionalString(value, 'finalAuditRunId') === undefined ? {} : { finalAuditRunId: optionalString(value, 'finalAuditRunId') },
     ...parseOptionalRef(value, 'blocker', ['code', 'message']) === undefined
       ? {}
@@ -1046,6 +1189,9 @@ export async function validateResume(
 export async function createRun(options: CreateRunOptions): Promise<RunState> {
   const runId = options.runId ?? generateRunId(options.now)
   assertRunId(runId)
+  if (options.qaPreference !== undefined && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(options.qaPreference)) {
+    throw new RunStateError('INVALID_TRANSITION', `invalid QA Adapter preference: ${options.qaPreference}`)
+  }
   const initialEnvironment = await captureEnvironment(options.cwd, options)
   const stateRoot = join(initialEnvironment.repo.privateGitDir, 'dev-harness', 'dsh')
   await mkdir(stateRoot, { recursive: true, mode: 0o700 })
@@ -1078,6 +1224,7 @@ export async function createRun(options: CreateRunOptions): Promise<RunState> {
       runId,
       ...environment,
       authorization: createRunAuthorization(options.authorization),
+      ...(options.qaPreference === undefined ? {} : { qaPreference: options.qaPreference }),
       phase: 'INIT',
       status: 'RUNNING',
       createdAt: timestamp,
@@ -1085,6 +1232,14 @@ export async function createRun(options: CreateRunOptions): Promise<RunState> {
       findings: [],
       fixRuns: [],
       commits: [],
+      verificationCycle: 0,
+      fullVerificationHistory: [],
+      qa: {
+        maxAttempts: MAX_QA_ATTEMPTS,
+        currentAttempt: 0,
+        runs: [],
+        findings: [],
+      },
     }
     const statePath = join(runDirectory, 'state.json')
     try {
@@ -1105,12 +1260,16 @@ function assertImmutable(previous: RunState, next: RunState): void {
     'contextFingerprint',
     'dependencies',
     'authorization',
+    'qaPreference',
     'createdAt',
   ] as const
   for (const key of immutable) {
     if (JSON.stringify(previous[key]) !== JSON.stringify(next[key])) {
       throw new RunStateError('INVALID_TRANSITION', `${key} is immutable`)
     }
+  }
+  if (previous.qa.maxAttempts !== next.qa.maxAttempts) {
+    throw new RunStateError('INVALID_TRANSITION', 'qa.maxAttempts is immutable')
   }
 }
 

@@ -188,10 +188,33 @@ test('records explicit commit-each authorization and refuses resume-time expansi
   }
 })
 
+test('persists one explicit QA Adapter preference as immutable run authority', async () => {
+  const harness = await createHarness()
+  try {
+    const started = await execute(harness, '/harness-run commit-each qa=fixture-browser')
+    const view = JSON.parse(started.result.text)
+    const state = await Plugin.loadRun(harness.cwd, view.runId)
+    assert.equal(state.qaPreference, 'fixture-browser')
+    assert.equal(state.qa.maxAttempts, Plugin.MAX_QA_ATTEMPTS)
+    await assert.rejects(Plugin.updateRun({
+      cwd: harness.cwd,
+      runId: state.runId,
+      expectedRevision: state.revision,
+      mutate(next) {
+        next.qaPreference = 'another-adapter'
+      },
+    }), error => error.code === 'INVALID_TRANSITION' && /qaPreference is immutable/u.test(error.message))
+  } finally {
+    await harness.dispose()
+  }
+})
+
 test('input, cwd, cancellation, and fiber disposal boundaries are fail closed', async () => {
   const harness = await createHarness()
   try {
     assert.equal((await execute(harness, '/harness-run unexpected')).result.kind, 'error')
+    assert.equal((await execute(harness, '/harness-run qa=Bad_Name')).result.kind, 'error')
+    assert.equal((await execute(harness, '/harness-run qa=one qa=two')).result.kind, 'error')
     assert.equal((await execute(harness, '/harness-resume')).result.kind, 'error')
     assert.equal((await execute(harness, '/harness-status one two')).result.kind, 'error')
 
