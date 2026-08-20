@@ -2,7 +2,7 @@
 
 > 本文档是 [Dashboard.md](Dashboard.md) 的执行层补充。产品边界与验收口径以 [MVP 需求](../product/REQUIREMENTS.md) 为准。
 >
-> **当前主题**：dev-harness-dsh MVP。Task V0、K1、K2、K3 已完成，Task K4 开发中；其他任务未经实现和验证证据不得标记完成。
+> **当前主题**：dev-harness-dsh MVP。Task V0、K1、K2、K3、K4 已完成，Task S1 开发中；其他任务未经实现和验证证据不得标记完成。
 
 <a id="task-v0"></a>
 ## 0. 前置调研：DSH 集成面与工具链基线（Task V0）
@@ -177,7 +177,7 @@
 ### Task K4：提交授权模型
 
 - **优先级**：🔴 P0
-- **状态**：🚧 开发中
+- **状态**：✅ 已完成
 - **估时**：K3 完成后评估
 - **依赖**：Task K3
 
@@ -189,11 +189,11 @@
 - 不在 Plugin 中暂存或创建第二次提交；
 - push、PR、tag、release、deploy 未获独立授权时始终禁止。
 
-**预计文件**：
+**实现文件**：
 
 - Create: `src/authorization.ts` — 授权 schema 与门控；
 - Modify: `src/orchestrator.ts` — 下游模式选择；
-- Test: `tests/authorization.test.ts` — 允许/禁止矩阵和恢复后一致性。
+- Test: `tests/authorization.test.mjs`、`tests/commands.test.mjs`、`tests/autofix.test.mjs`、`tests/remediation.test.mjs` — 允许/禁止矩阵、提交真实性和恢复一致性。
 
 **Steps:**
 
@@ -201,6 +201,14 @@
 2. 将授权映射到下游 Auto Fix 模式。
 3. 阻止 Plugin 自行提交及重复提交。
 4. 测试暂停恢复后授权不会变化或被默认升级。
+
+**完成证据（2026-08-20）**：
+
+- `src/authorization.ts` 固定版本化 Run 授权；默认 `fix-only`，只有 `/harness-run commit-each` 显式升级，下游分别映射 `fix` / `commit`，push、PR、tag、release、deploy 均保持独立未授权；
+- Run State schema 升级并把 authorization 纳入 immutable 字段；旧 schema fail closed，暂停/恢复不能默认升级或降级；
+- commit 模式的权威 Observation 必须包含且只包含一个提交，绑定 parent、changed files、Review diff、Git Workflow evidence 和 post-commit workspace；fix 模式仍强制 commits 为空；
+- Plugin 不执行 `git add` / `git commit`，只读取 Git 实况并核对 SHA、唯一 parent、精确 commit paths、HEAD、branch、Context、依赖与残留 dirty scope；接纳 HEAD 与提交引用在一次原子 state checkpoint 中完成；
+- 自动化验证两个 Finding 各自产生独立 parent 链、commit 暂停恢复、授权不变、重复/越界提交拒绝和五类外部动作禁止；38 个生产自动化用例及 `npm run verify` PASS。
 
 ---
 
@@ -210,7 +218,7 @@
 ### Task S1：Full Verification
 
 - **优先级**：🟡 P1
-- **状态**：📋 规划中
+- **状态**：🚧 开发中
 - **估时**：K4 完成后评估
 - **依赖**：Task K4；目标项目具有已确认的 `harness:full`
 

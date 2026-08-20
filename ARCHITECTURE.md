@@ -4,14 +4,15 @@
 生产包 peer 依赖 Cordis、dsh-commands 与 dsh-skill，运行时依赖 atomic-write 与 Schemastery；开发依赖精确锁定 rc.8 Session 与 Skill filesystem 测试栈
 
 ## 核心业务流程
-Human Command 先做 Skill preflight，再依 phase 启动/恢复 Audit 或 fix-only Auto Fix Adapter；Plugin 在 OPEN mutation lease 内独立核对 Git 输出所有权和哈希，串行推进当前 confirmed Finding
+Human Command 先做 Skill preflight，再依 phase 启动/恢复 Audit 或授权模式的 Auto Fix Adapter；Plugin 在 OPEN mutation lease 内独立核对 Git 输出或下游提交证据，串行推进当前 confirmed Finding
 
 ## 架构模式
-生产 Cordis Service、Human Command、原子 Run State、版本化 Audit/Auto Fix Adapter、可恢复 Orchestrator 与 Finding Router 分层实现；V0 fixture 保留为 rc.8 兼容性证明
+生产 Cordis Service、Human Command、不可变 Run Authorization、原子 Run State、版本化 Audit/Auto Fix Adapter、可恢复 Orchestrator 与 Finding Router 分层实现；V0 fixture 保留为 rc.8 兼容性证明
 
 ## 模块接口与通信方式
 - Audit Adapter：版本化 Observation + OPEN mutation lease + quiescent workspace checkpoint
-- Auto Fix Adapter：fix-only CompletionStatus + changed-file ownership + monotonic resumable checkpoint
+- Auto Fix Adapter：authorization-bound fix/commit CompletionStatus + changed-file/commit ownership + monotonic resumable checkpoint
+- Run Authorization：fix-only / commit-each immutable mode + independently denied external actions + verified commit boundary
 - Finding Router：typed handoff 驱动路由，只有 confirmed defect 进入 Auto Fix
 - Bundle manifest：package.json 的 dsh.bundle.patch 指向 cordis.patch.yml
 - Plugin surface：name、inject、Config、apply(ctx, config)
@@ -25,6 +26,7 @@ Human Command 先做 Skill preflight，再依 phase 启动/恢复 Audit 或 fix-
 ## 关键模块标记
 - AuditAdapter + AuditObservation
 - AutoFixAdapter + AutoFixObservation
+- RunAuthorization + adoptCommitBoundary
 - autoFixLease + autoFixCheckpoint + advanceRemediationRun
 - auditLease + auditCheckpoint + advanceAuditRun
 - ctx.devHarness + harness-run/resume/status
