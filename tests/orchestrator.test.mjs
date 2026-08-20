@@ -202,6 +202,34 @@ class FixtureAutoFixAdapter {
   async resume() { throw new Error('not reached') }
 }
 
+class FixtureFullVerificationAdapter {
+  name = 'fixture-full-verification'
+
+  async start(request) {
+    return {
+      contractVersion: 1,
+      runId: request.verificationRunId,
+      revision: 1,
+      executionStatus: 'COMPLETED',
+      resultStatus: 'PASS',
+      command: request.command,
+      repositoryRoot: request.cwd,
+      head: request.expectedHead,
+      branch: request.expectedBranch,
+      workspaceFingerprint: request.expectedWorkspaceFingerprint,
+      snapshotRef: request.expectedSnapshotRef,
+      runRef: 'verification:run:command-flow',
+      startedAt: '2026-08-20T12:00:00.000Z',
+      finishedAt: '2026-08-20T12:01:00.000Z',
+      evidenceRef: 'verification:evidence:command-flow',
+      workspaceVerified: true,
+      quiescent: true,
+    }
+  }
+
+  async resume() { throw new Error('not reached') }
+}
+
 test('Audit start and resume checkpoints only refs, then routes confirmed defects', async () => {
   const cwd = await repository()
   const ctx = new Context()
@@ -219,6 +247,7 @@ test('Audit start and resume checkpoints only refs, then routes confirmed defect
   const fiber = await ctx.plugin(Plugin)
   const unregister = ctx.devHarness.registerAuditAdapter(new FixtureAuditAdapter())
   const unregisterAutoFix = ctx.devHarness.registerAutoFixAdapter(new FixtureAutoFixAdapter())
+  const unregisterVerification = ctx.devHarness.registerFullVerificationAdapter(new FixtureFullVerificationAdapter())
   try {
     const session = ctx.sessions.create(SessionId('audit-command-flow'), { meta: { cwd } })
     const agent = { id: session.id, session }
@@ -266,6 +295,18 @@ test('Audit start and resume checkpoints only refs, then routes confirmed defect
     assert.deepEqual(remediated.commits, [])
     await Plugin.validateResume(remediated, cwd)
 
+    const verifiedResult = await ctx.commands.execute(
+      agent,
+      `/harness-resume ${active.runId}`,
+      [],
+      new AbortController().signal,
+    )
+    assert.equal(verifiedResult.result.kind, 'success')
+    const verified = await Plugin.loadRun(cwd, active.runId)
+    assert.equal(verified.phase, 'FULL_VERIFY')
+    assert.equal(verified.fullVerification.status, 'PASS')
+    await Plugin.validateResume(verified, cwd)
+
     const rawState = await readFile(await Plugin.resolveStatePath(cwd, active.runId), 'utf8')
     assert.equal(rawState.includes('handoff:defect-1'), true)
     assert.equal(rawState.includes('Claim'), false)
@@ -273,6 +314,7 @@ test('Audit start and resume checkpoints only refs, then routes confirmed defect
 
     unregister()
     unregisterAutoFix()
+    unregisterVerification()
     assert.throws(
       () => ctx.devHarness.advanceAudit(cwd, active.runId, new AbortController().signal),
       /no Audit Adapter/u,
@@ -280,6 +322,7 @@ test('Audit start and resume checkpoints only refs, then routes confirmed defect
   } finally {
     unregister()
     unregisterAutoFix()
+    unregisterVerification()
     await fiber.dispose()
     await ctx.fiber.dispose()
     await rm(cwd, { recursive: true, force: true })

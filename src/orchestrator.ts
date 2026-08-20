@@ -17,6 +17,13 @@ import {
 } from './autofix.js'
 import { autoFixExecutionMode } from './authorization.js'
 import {
+  FULL_VERIFICATION_COMMAND,
+  FullVerificationContractError,
+  validateFullVerificationObservation,
+  type FullVerificationAdapter,
+  type FullVerificationObservation,
+} from './verification.js'
+import {
   adoptCommitBoundary,
   adoptWorktreeBoundary,
   captureWorktreeBoundary,
@@ -372,6 +379,196 @@ export async function advanceRemediationRun(options: {
       applyAutoFixObservation(next, finding.findingId, observation, baseChangedPaths, before, after)
     },
   })
+}
+
+export async function advanceFullVerification(options: {
+  readonly cwd: string
+  readonly runId: string
+  readonly adapter: FullVerificationAdapter
+  readonly signal: AbortSignal
+}): Promise<RunState> {
+  throwIfAborted(options.signal)
+  let state = await loadRun(options.cwd, options.runId)
+  if (!['REMEDIATE', 'FULL_VERIFY'].includes(state.phase)) {
+    throw new OrchestratorError(`Full Verification cannot advance from phase ${state.phase}`)
+  }
+  if (nextAutoFixFinding(state) !== undefined) {
+    throw new OrchestratorError('Full Verification cannot start while Auto Fix findings remain')
+  }
+  if (
+    state.phase === 'FULL_VERIFY'
+    && state.status === 'RUNNING'
+    && state.fullVerification?.status === 'PASS'
+  ) return state
+  if (['PAUSED', 'BLOCKED'].includes(state.status)) {
+    state = await updateRun({
+      cwd: options.cwd,
+      runId: state.runId,
+      expectedRevision: state.revision,
+      mutate(next) {
+        next.status = 'RUNNING'
+        delete next.blocker
+      },
+    })
+  }
+  if (['FAILED', 'CANCELLED', 'DONE', 'DONE_WITH_CONCERNS'].includes(state.status)) {
+    throw new OrchestratorError(`Full Verification cannot advance a ${state.status} run`)
+  }
+
+  let before: WorktreeBoundary
+  if (state.fullVerificationLease === undefined) {
+    await validateResume(state, options.cwd)
+    before = await captureWorktreeBoundary(options.cwd)
+    const verificationRunId = state.fullVerification?.verificationRunId
+      ?? stableVerificationRunId(state.runId)
+    const snapshotRef = state.fullVerification?.snapshotRef
+      ?? stableVerificationSnapshot(state.repo.head, before.fingerprint)
+    state = await updateRun({
+      cwd: options.cwd,
+      runId: state.runId,
+      expectedRevision: state.revision,
+      mutate(next) {
+        next.phase = 'FULL_VERIFY'
+        next.fullVerificationLease = {
+          verificationRunId,
+          adapterName: options.adapter.name,
+          snapshotRef,
+          beforeFingerprint: before.fingerprint,
+          beforeChangedPaths: { ...before.changedPaths },
+          status: 'OPEN',
+        }
+      },
+    })
+  } else {
+    if (state.fullVerificationLease.adapterName !== options.adapter.name) {
+      throw new OrchestratorError('open Full Verification lease belongs to another Adapter')
+    }
+    before = {
+      worktreeRoot: state.repo.worktreeRoot,
+      fingerprint: state.fullVerificationLease.beforeFingerprint,
+      changedPaths: state.fullVerificationLease.beforeChangedPaths,
+    }
+    assertReadOnlyVerificationWorkspace(before, await captureWorktreeBoundary(options.cwd))
+  }
+
+  const lease = state.fullVerificationLease
+  if (lease === undefined) throw new OrchestratorError('Full Verification lease was not persisted')
+  const request = {
+    cwd: state.repo.worktreeRoot,
+    orchestrationRunId: state.runId,
+    verificationRunId: lease.verificationRunId,
+    command: FULL_VERIFICATION_COMMAND,
+    expectedHead: state.repo.head,
+    expectedBranch: state.repo.branch,
+    expectedWorkspaceFingerprint: lease.beforeFingerprint,
+    expectedSnapshotRef: lease.snapshotRef,
+    signal: options.signal,
+  }
+  throwIfAborted(options.signal)
+  const rawObservation = state.fullVerification === undefined
+    ? await options.adapter.start(request)
+    : await options.adapter.resume({
+        ...request,
+        expectedRevision: state.fullVerification.revision,
+        expectedRunRef: state.fullVerification.runRef,
+      })
+  throwIfAborted(options.signal)
+  const observation = validateFullVerificationObservation(rawObservation, {
+    runId: lease.verificationRunId,
+    repositoryRoot: state.repo.worktreeRoot,
+    head: state.repo.head,
+    branch: state.repo.branch,
+    workspaceFingerprint: lease.beforeFingerprint,
+    snapshotRef: lease.snapshotRef,
+  })
+  assertMonotonicVerification(state, observation)
+  const after = await captureWorktreeBoundary(options.cwd)
+  assertReadOnlyVerificationWorkspace(before, after)
+  await validateResume(state, options.cwd)
+
+  return await updateRun({
+    cwd: options.cwd,
+    runId: state.runId,
+    expectedRevision: state.revision,
+    mutate(next) {
+      next.phase = 'FULL_VERIFY'
+      next.fullVerification = {
+        verificationRunId: observation.runId,
+        executionStatus: observation.executionStatus,
+        ...(observation.resultStatus === undefined ? {} : { status: observation.resultStatus }),
+        revision: observation.revision,
+        command: observation.command,
+        runRef: observation.runRef,
+        snapshotRef: observation.snapshotRef,
+        workspaceFingerprint: observation.workspaceFingerprint,
+        ...(observation.evidenceRef === undefined ? {} : { evidenceRef: observation.evidenceRef }),
+      }
+      delete next.fullVerificationLease
+      delete next.blocker
+      if (observation.executionStatus === 'RUNNING') {
+        next.status = 'PAUSED'
+      } else if (observation.executionStatus === 'CANCELLED') {
+        next.status = 'CANCELLED'
+      } else if (observation.executionStatus === 'FAILED') {
+        next.status = 'FAILED'
+        next.blocker = { code: 'FULL_VERIFICATION_EXECUTION_FAILED', message: observation.evidenceRef! }
+      } else if (observation.resultStatus === 'PASS') {
+        next.status = 'RUNNING'
+      } else if (observation.resultStatus === 'FAIL') {
+        next.status = 'FAILED'
+        next.blocker = { code: 'FULL_VERIFICATION_FAILED', message: observation.evidenceRef! }
+      } else if (observation.resultStatus === 'ENTRY_MISSING') {
+        next.status = 'BLOCKED'
+        next.blocker = { code: 'FULL_VERIFICATION_ENTRY_MISSING', message: observation.evidenceRef! }
+      } else {
+        next.status = 'BLOCKED'
+        next.blocker = { code: 'FULL_VERIFICATION_ENVIRONMENT_UNAVAILABLE', message: observation.evidenceRef! }
+      }
+    },
+  })
+}
+
+function stableVerificationRunId(orchestrationRunId: string): string {
+  return `verify-${createHash('sha256').update(orchestrationRunId).digest('hex').slice(0, 16)}`
+}
+
+function stableVerificationSnapshot(head: string, workspaceFingerprint: string): string {
+  const digest = createHash('sha256').update(`${head}\0${workspaceFingerprint}`).digest('hex')
+  return `verification-snapshot-${digest}`
+}
+
+function assertMonotonicVerification(state: RunState, observation: FullVerificationObservation): void {
+  const previous = state.fullVerification
+  if (previous === undefined) return
+  if (observation.runId !== previous.verificationRunId || observation.runRef !== previous.runRef) {
+    throw new FullVerificationContractError('Verification Adapter changed run identity')
+  }
+  if (observation.revision < previous.revision) {
+    throw new FullVerificationContractError('Verification Adapter revision moved backwards')
+  }
+  if (
+    observation.revision === previous.revision
+    && (
+      observation.executionStatus !== previous.executionStatus
+      || observation.resultStatus !== previous.status
+    )
+  ) {
+    throw new FullVerificationContractError('Verification Adapter changed status at the same revision')
+  }
+  if (observation.snapshotRef !== previous.snapshotRef) {
+    throw new FullVerificationContractError('Verification Adapter changed snapshot during resume')
+  }
+}
+
+function assertReadOnlyVerificationWorkspace(before: WorktreeBoundary, after: WorktreeBoundary): void {
+  if (before.worktreeRoot !== after.worktreeRoot || before.fingerprint !== after.fingerprint) {
+    throw new FullVerificationContractError('Full Verification changed the Git worktree')
+  }
+  const beforeEntries = Object.entries(before.changedPaths).sort(([left], [right]) => left.localeCompare(right))
+  const afterEntries = Object.entries(after.changedPaths).sort(([left], [right]) => left.localeCompare(right))
+  if (JSON.stringify(beforeEntries) !== JSON.stringify(afterEntries)) {
+    throw new FullVerificationContractError('Full Verification changed dirty-file scope')
+  }
 }
 
 function applyAutoFixObservation(

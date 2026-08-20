@@ -4,9 +4,10 @@ import type {} from '@deepseek-ai/dsh-skill'
 import z from '@deepseek-ai/schemastery'
 
 import { registerCommands, resumeCommand, runCommand, statusCommand } from './commands.js'
-import { advanceAuditRun, advanceRemediationRun } from './orchestrator.js'
+import { advanceAuditRun, advanceFullVerification, advanceRemediationRun } from './orchestrator.js'
 import type { AuditAdapter } from './audit.js'
 import type { AutoFixAdapter } from './autofix.js'
+import type { FullVerificationAdapter } from './verification.js'
 
 export * from './commands.js'
 export * from './authorization.js'
@@ -40,6 +41,7 @@ export class DevHarnessRuntime extends Service {
   readonly requiredSkills: readonly string[]
   private auditAdapter?: AuditAdapter
   private autoFixAdapter?: AutoFixAdapter
+  private fullVerificationAdapter?: FullVerificationAdapter
 
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'devHarness')
@@ -66,11 +68,12 @@ export class DevHarnessRuntime extends Service {
   resume(invocation: import('@deepseek-ai/dsh-commands').CommandInvocation) {
     const adapter = this.auditAdapter
     const autoFixAdapter = this.autoFixAdapter
+    const fullVerificationAdapter = this.fullVerificationAdapter
     return resumeCommand(
       this.ctx,
       this.requiredSkills,
       invocation,
-      adapter === undefined && autoFixAdapter === undefined
+      adapter === undefined && autoFixAdapter === undefined && fullVerificationAdapter === undefined
         ? undefined
         : (state, signal) => {
             if (['PREFLIGHT', 'AUDIT'].includes(state.phase)) {
@@ -82,13 +85,17 @@ export class DevHarnessRuntime extends Service {
                 adapter,
               })
             }
-            if (['ROUTE', 'REMEDIATE'].includes(state.phase)) {
+            if (state.phase === 'ROUTE' || (state.phase === 'REMEDIATE' && hasPendingAutoFix(state))) {
               if (autoFixAdapter === undefined) return Promise.resolve(state)
-              return advanceRemediationRun({
+              return advanceRemediationRun({ cwd: state.repo.worktreeRoot, runId: state.runId, signal, adapter: autoFixAdapter })
+            }
+            if (['REMEDIATE', 'FULL_VERIFY'].includes(state.phase)) {
+              if (fullVerificationAdapter === undefined) return Promise.resolve(state)
+              return advanceFullVerification({
                 cwd: state.repo.worktreeRoot,
                 runId: state.runId,
                 signal,
-                adapter: autoFixAdapter,
+                adapter: fullVerificationAdapter,
               })
             }
             return Promise.resolve(state)
@@ -127,6 +134,29 @@ export class DevHarnessRuntime extends Service {
     if (this.autoFixAdapter === undefined) throw new Error('no Auto Fix Adapter is registered')
     return advanceRemediationRun({ cwd, runId, signal, adapter: this.autoFixAdapter })
   }
+
+  registerFullVerificationAdapter(adapter: FullVerificationAdapter): () => void {
+    if (this.fullVerificationAdapter !== undefined) throw new Error('a Full Verification Adapter is already registered')
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(adapter.name)) throw new TypeError('invalid Full Verification Adapter name')
+    this.fullVerificationAdapter = adapter
+    return () => {
+      if (this.fullVerificationAdapter === adapter) this.fullVerificationAdapter = undefined
+    }
+  }
+
+  advanceFullVerification(cwd: string, runId: string, signal: AbortSignal) {
+    if (this.fullVerificationAdapter === undefined) throw new Error('no Full Verification Adapter is registered')
+    return advanceFullVerification({ cwd, runId, signal, adapter: this.fullVerificationAdapter })
+  }
+}
+
+function hasPendingAutoFix(state: import('./state.js').RunState): boolean {
+  return state.findings.some(finding =>
+    finding.status === 'confirmed'
+    && finding.route === 'auto-fix'
+    && !state.fixRuns.some(run =>
+      run.findingId === finding.findingId
+      && ['DONE', 'DONE_WITH_CONCERNS'].includes(run.status)))
 }
 
 export function apply(ctx: Context, config: Config = {}): void {
