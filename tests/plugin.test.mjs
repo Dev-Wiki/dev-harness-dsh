@@ -12,16 +12,36 @@ test('production plugin exposes a fiber-owned orchestration service', async () =
   await ctx.plugin(Commands)
   await ctx.plugin(SkillRegistry)
   const fiber = await ctx.plugin(Plugin, {
-    requiredSkills: ['dev-harness-codebase-audit'],
+    additionalRequiredSkills: ['project-extra'],
   })
 
   try {
     assert.equal(ctx.devHarness instanceof Plugin.DevHarnessRuntime, true)
-    assert.deepEqual(ctx.devHarness.requiredSkills, ['dev-harness-codebase-audit'])
+    assert.deepEqual(ctx.devHarness.requiredSkills, [
+      'dev-harness-auto-fix',
+      'dev-harness-codebase-audit',
+      'dev-harness-commands',
+      'dev-harness-git-workflow',
+      'project-extra',
+    ])
     assert.equal(Object.isFrozen(ctx.devHarness.requiredSkills), true)
   } finally {
     await fiber.dispose()
     assert.equal(ctx.get('devHarness'), undefined)
+    await ctx.fiber.dispose()
+  }
+})
+
+test('core required Skills cannot be configured away', async () => {
+  const ctx = new Context()
+  await ctx.plugin(Commands)
+  await ctx.plugin(SkillRegistry)
+  const fiber = await ctx.plugin(Plugin, { additionalRequiredSkills: [] })
+  try {
+    assert.equal(ctx.devHarness.requiredSkills.includes('dev-harness-codebase-audit'), true)
+    assert.equal(ctx.devHarness.requiredSkills.includes('dev-harness-auto-fix'), true)
+  } finally {
+    await fiber.dispose()
     await ctx.fiber.dispose()
   }
 })
