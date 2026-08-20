@@ -45,8 +45,9 @@
 
 ## 5. 当前缺口与后续边界
 
-1. **自动 QA 集成证据**：当前没有已验证的 external Skill 或 native browser/UI QA 协议；未注册 verified Adapter 时按设计生成 manual checklist 并停在 `NEEDS_USER`。
+1. **自动 QA 集成证据**：当前没有已验证的 external Skill 或 native browser/UI QA 协议；注册 verified Adapter 必须提供 URI 形式 `verificationEvidenceRef`（`file:` 引用需真实存在），未注册时按设计生成 manual checklist 并停在 `NEEDS_USER`。
 2. **MVP 外动作**：push、PR、tag、release、deploy 仍不在本次授权和产品范围内。
+3. **CI 待取证**：`.github/workflows/ci.yml` 已配置（复用 HARNESS 已确认命令），等待首次远端运行证据后回填 HARNESS.md。
 
 > 起手顺序：V0 → K1 → K2 → K3 → K4 → S1 → S2 → S3 → S4。
 

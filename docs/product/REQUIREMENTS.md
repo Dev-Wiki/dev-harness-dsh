@@ -85,12 +85,12 @@ MVP 至少提供以下人类可调用能力：
 
 - `run`：创建新编排 Run；
 - `resume`：校验状态后恢复已暂停或中断的 Run；
-- `status`：展示阶段、当前 Finding、阻塞和最近结果。
+- `status`：展示阶段、当前 Finding、阻塞和最近结果；
+- `cancel`：显式取消 Run 并保留可审计状态（`/harness-cancel`，终态 Run 幂等返回）。
 
 后续可提供：
 
-- `audit`：只执行或恢复 Audit 阶段；
-- `cancel`：显式取消 Run 并保留可审计状态。
+- `audit`：只执行或恢复 Audit 阶段。
 
 入口名称和注册方式以 DSH 集成基线为准。命令只负责启动或控制 Orchestrator，不直接承载 Agent 推理。
 

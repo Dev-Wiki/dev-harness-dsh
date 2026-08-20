@@ -101,9 +101,12 @@ dsh --profile headless --dump-config
 /harness-run [fix-only|commit-each] [qa=<adapter-name>]
 /harness-resume <run-id>
 /harness-status [run-id]
+/harness-cancel [run-id]
 ```
 
 命令必须在带工作区目录的 Session 中执行。`fix-only` 是 `/harness-run` 的默认授权；`commit-each` 仅授权 Auto Fix 按合同提交，不授权 push、PR、tag、release 或 deploy。
+
+> ⚠️ **恢复前工作区必须与快照完全一致**：`/harness-resume` 会先执行恢复校验，要求 HEAD、分支、lockfile、Context 文件、依赖版本以及整个工作区（**包括未跟踪文件**）与上次 checkpoint 完全一致。任何变更——手工编辑、新增文件、提交、依赖变更——都会让恢复以 `WORKTREE_MISMATCH` / `HEAD_MISMATCH` / `CONTEXT_MISMATCH` / `DEPENDENCY_MISMATCH` fail closed。需要继续时，先处理这些变更（提交/还原/清理）后重建 Run，或在保持工作区不变的前提下直接恢复。
 
 ## 5. 升级或重新安装
 
@@ -137,6 +140,10 @@ dsh --profile headless --dump-config
 
 确认安装和 `--dump-config` 使用了同一个 profile，并检查 `.tgz` 是否使用绝对路径。安装成功不能代替组合验证，应以目标 profile 的 `--dump-config` 结果为准。
 
+### 恢复报 WORKTREE_MISMATCH / HEAD_MISMATCH / CONTEXT_MISMATCH / DEPENDENCY_MISMATCH
+
+这是设计行为而非故障：恢复校验要求工作区与上次 checkpoint 逐字节一致（含未跟踪文件、HEAD、lockfile、Context 与依赖版本）。先决定如何处理这些变更：提交或还原到快照状态、清理多余未跟踪文件，然后重新执行 `/harness-resume`；如果变更本身是预期的，请开始一个新的 `/harness-run`。
+
 ### Skill preflight 报缺失
 
 确认四个核心 Skill 的目录名和 `SKILL.md` 中的 `name` 完全一致，并且目录位于当前工作区或用户级 Skill filesystem 搜索路径中。安装 npm 包不会自动安装这些 Skill。
@@ -150,5 +157,6 @@ dsh --profile headless --dump-config
 - `.tgz` 安装、profile dependency/bundle 注册、`--dump-config` 组合结果和卸载命令已经在隔离的 DSH rc.8 profile 中验证；
 - Plugin 生命周期、Human Command 注册/卸载和生产合同由自动化测试覆盖；
 - 当前没有已验证的 external Skill 或 native browser/UI QA 协议；没有带验证证据的 QA Adapter 时，运行会生成 manual checklist 并停在 `NEEDS_USER`，不会声明 QA PASS。
+- QA Adapter 注册要求 `verificationEvidenceRef` 为 URI 形式引用（如 `qa:`、`https:`、`file:`）；`file:` 引用在注册/选择时必须能解析到真实存在的文件，否则 fail closed。
 
 DSH rc.8 的底层集成证据与停止线见 [DSH rc.8 API 基线](../integration/DSH_API_BASELINE.md)。

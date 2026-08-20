@@ -32,7 +32,7 @@ DeepSeek Harness TypeScript Plugin 项目；Task V0、K1、K2、K3、K4、S1、S
 - **Preconditions**: 已执行 `pnpm install --frozen-lockfile --ignore-scripts`
 - **DeviceRequirement**: `none`
 - **Shell / Environment**: 项目兼容 shell；无 LLM/API 凭据要求；pack dry-run 需要可写 npm cache
-- **Evidence**: `package.json:28-32`；2026-08-20 本机执行生产 full，typecheck、Oxlint、62 个自动化用例、build 与 pack dry-run PASS；tarball 38 个文件
+- **Evidence**: `package.json:28-32`；2026-08-20 本机执行生产 full，typecheck、Oxlint、68 个自动化用例、build 与 pack dry-run PASS；tarball 38 个文件
 - **Status**: `confirmed`
 
 ### V0 fixture build
@@ -99,6 +99,13 @@ DeepSeek Harness TypeScript Plugin 项目；Task V0、K1、K2、K3、K4、S1、S
 - quick: npm run harness:quick
 - bugfix: npm run harness:bugfix
 - full: npm run harness:full
+
+## CI 流水线
+
+- 工作流：`.github/workflows/ci.yml`，在 push（main）与 pull_request 时触发。
+- production job：Node.js 22.19.0 与 24.x 上运行 `npm run harness:full`（即本文件已确认命令）。
+- fixture job：Node.js 24.x 上先执行 `pnpm --dir experiments/v0-minimal-plugin install --frozen-lockfile --ignore-scripts`，再运行 `npm --prefix experiments/v0-minimal-plugin run verify`。
+- CI 只复用本文件已确认命令，不引入新的验证口径；首次远端运行通过后，应把运行链接作为证据回填本节。
 
 ## 需人工确认
 - 当前没有已验证的 external Skill 或 native browser/UI QA 协议；只有带运行证据并显式注册的 Adapter 可自动执行，否则安全降级为 manual `NEEDS_USER`

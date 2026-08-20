@@ -14,7 +14,7 @@ Human Command 先做 Skill preflight，再依 phase 启动/恢复 Audit、授权
 - Auto Fix Adapter：authorization-bound fix/commit CompletionStatus + changed-file/commit ownership + monotonic resumable checkpoint
 - Run Authorization：fix-only / commit-each immutable mode + independently denied external actions + verified commit boundary
 - Full Verification Adapter：canonical harness:full + stable snapshot + read-only workspace boundary + distinct failure outcomes
-- QA Adapter：verified capability evidence + stable attempt/resume identity + manual checklist fallback + read-only boundary
+- QA Adapter：verified capability evidence（URI 形式 verificationEvidenceRef，file: 引用必须存在）+ stable attempt/resume identity + manual checklist fallback + read-only boundary
 - QaFinding：独立 `QAF-*` source + authorization-preserving Auto Fix + fresh verification cycle + bounded retry
 - Final Reconciliation Adapter：original Finding identity set + fresh Audit snapshot + Audit-root mutation lease + authoritative outcomes
 - Run Summary：authoritative refs only + deterministic concern aggregation + schema-validated REPORT/DONE checkpoints

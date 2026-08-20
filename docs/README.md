@@ -27,4 +27,4 @@
 - `integration/DSH_API_BASELINE.md` 维护 DSH 集成事实与验证边界，不承担任务状态汇总。
 - `how-to/INSTALL.md` 维护面向使用者的安装、启用和卸载步骤，不维护 DSH 底层 API 证据。
 - 外部 DSH API、SDK 和运行时行为在验证前只放在“待确认”范围，不写成当前事实。
-- 发布变化未来由 `CHANGELOG.md` 维护；本文档中心只提供入口。
+- 发布变化由根目录 [CHANGELOG.md](../CHANGELOG.md) 维护；本文档中心只提供入口。
