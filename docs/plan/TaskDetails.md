@@ -2,7 +2,7 @@
 
 > 本文档是 [Dashboard.md](Dashboard.md) 的执行层补充。产品边界与验收口径以 [MVP 需求](../product/REQUIREMENTS.md) 为准。
 >
-> **当前主题**：dev-harness-dsh MVP。Task V0、K1、K2 已完成，Task K3 开发中；其他任务未经实现和验证证据不得标记完成。
+> **当前主题**：dev-harness-dsh MVP。Task V0、K1、K2、K3 已完成，Task K4 开发中；其他任务未经实现和验证证据不得标记完成。
 
 <a id="task-v0"></a>
 ## 0. 前置调研：DSH 集成面与工具链基线（Task V0）
@@ -136,7 +136,7 @@
 ### Task K3：Auto Fix 队列、暂停与恢复
 
 - **优先级**：🔴 P0
-- **状态**：🚧 开发中
+- **状态**：✅ 已完成
 - **估时**：K2 完成后评估
 - **依赖**：Task K2；可运行的 `dev-harness-auto-fix` fixture
 
@@ -148,11 +148,12 @@
 - `BLOCKED` / `NEEDS_CONTEXT` 停止队列并进入明确状态；
 - 进程中断后从 Plugin 和 Auto Fix 状态共同恢复。
 
-**预计文件**：
+**实现文件**：
 
+- Create: `src/autofix.ts` — 版本化 fix-only Adapter/Observation 合同；
 - Modify: `src/orchestrator.ts` — REMEDIATE 阶段和队列推进；
 - Modify: `src/state.ts` — Auto Fix Run 引用和当前 Finding；
-- Test: `tests/orchestrator.test.ts`、`tests/resume.test.ts` — 完成、阻塞、漂移和恢复。
+- Test: `tests/autofix.test.mjs`、`tests/orchestrator.test.mjs`、`tests/remediation.test.mjs` — 完成、阻塞、漂移和恢复。
 
 **Steps:**
 
@@ -162,13 +163,21 @@
 4. 测试 Plugin 不读取或复制 Hypotheses、Regression Evidence 和 Review Diff。
 5. 验证同一 Finding 不会重复启动未终止 Run。
 
+**完成证据（2026-08-20）**：
+
+- `src/autofix.ts` 固定 `mode: fix` 的版本化输入/Observation，绑定 Audit run/snapshot/registry、Finding、HEAD/branch 和 workspace baseline；完成门禁要求单调 revision/state digest、RED/GREEN、Review PASS、fresh final verification 与相同 diff hash，且 commits 必须为空；
+- `DONE_WITH_CONCERNS` 必须保存 residual-risk 引用；`BLOCKED` / `NEEDS_CONTEXT` 必须保存 blocker 引用并分别停止为 `BLOCKED` / `NEEDS_USER`，未知失败不伪装成成功或 concerns；
+- `src/orchestrator.ts` 为每个 confirmed auto-fix Finding 生成稳定独立 Run id，在 Adapter 调用前持久化 OPEN mutation lease，独立核对真实 Git changed-file ownership/fingerprint，再接纳工作区 baseline；
+- 同一 Finding 的 RUNNING checkpoint 通过 `/harness-resume` 以原 Run、snapshot 和单调 revision 恢复；Adapter 写后崩溃可幂等 start，越权路径、身份串线、同 revision 状态变化和后续 fix-only Run 重叠已有 dirty file 均 fail closed；
+- Plugin state 只保存 run/status、workspace snapshot、execution/verification/risk 引用与 Review diff hash，不复制 Hypotheses、Regression Evidence 或 Review Diff 正文；31 个生产自动化用例及 `npm run verify` PASS。
+
 ---
 
 <a id="task-k4"></a>
 ### Task K4：提交授权模型
 
 - **优先级**：🔴 P0
-- **状态**：📋 规划中
+- **状态**：🚧 开发中
 - **估时**：K3 完成后评估
 - **依赖**：Task K3
 

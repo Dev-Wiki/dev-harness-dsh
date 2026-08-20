@@ -27,9 +27,9 @@
 ## 1. 项目上下文速查
 
 - **语言/框架**: TypeScript ES modules，Cordis 4.0.1 Plugin，DeepSeek Harness 0.1.0-rc.8，Schemastery 3.18.1，Node.js 22.19+
-- **架构模式**: 生产 Cordis Service、Human Command、原子 Run State、版本化 Adapter、可恢复 Orchestrator 与 Finding Router 分层实现；V0 fixture 保留为 rc.8 兼容性证明
+- **架构模式**: 生产 Cordis Service、Human Command、原子 Run State、版本化 Audit/Auto Fix Adapter、可恢复 Orchestrator 与 Finding Router 分层实现；V0 fixture 保留为 rc.8 兼容性证明
 - **核心入口**: src/index.ts 的 named Cordis plugin exports 与 DevHarnessRuntime service
-- **核心调用链**: Human Command 先做 Skill preflight，再由 Audit Adapter 在 OPEN mutation lease 内启动/恢复；Plugin 独立核对 Git 输出哈希、接纳新 baseline，并只路由当前 confirmed Finding
+- **核心调用链**: Human Command 先做 Skill preflight，再依 phase 启动/恢复 Audit 或 fix-only Auto Fix Adapter；Plugin 在 OPEN mutation lease 内独立核对 Git 输出所有权和哈希，串行推进当前 confirmed Finding
 - **版本识别依据**: 目标版本 dsh-v0.1.0-rc.8 / commit 141eb6fef83422698aef7a981029e843e8161534；生产依赖图由根 pnpm-lock.yaml 固定
 
 ## 1b. 文件信任等级
@@ -60,7 +60,7 @@ Plugin owns orchestration；Skill owns semantics。需求、计划、实现证�
 
 ## 5. 高风险文件标注
 
-依赖版本、bundle patch、Plugin/Adapter 生命周期、Git private dir、mutation lease、原子状态与 workspace checkpoint 属于高风险边界
+依赖版本、bundle patch、Plugin/Adapter 生命周期、Git private dir、Audit/Auto Fix mutation lease、原子状态与 workspace checkpoint 属于高风险边界
 
 ## 6. 新增功能的一般流程
 
@@ -80,7 +80,7 @@ Human Command 生命周期由 Session 的 command/run 与 command/done 记录；
 
 ## 10. 提问与探索建议
 
-先读 Dashboard、HARNESS 与 DSH_API_BASELINE，再沿 src/index.ts、audit/orchestrator/router/state 和对应 tests 探索；Adapter 不直接绑定下游 runtime CLI 外壳
+先读 Dashboard、HARNESS 与 DSH_API_BASELINE，再沿 src/index.ts、audit/autofix/orchestrator/router/state 和对应 tests 探索；Adapter 不直接绑定下游 runtime CLI 外壳
 
 ## 11. 自动识别候选
 
@@ -92,7 +92,7 @@ Human Command 生命周期由 Session 的 command/run 与 command/done 记录；
 
 ## 12. 需人工确认
 
-- K3 尚需固定 Auto Fix Adapter、权威 CompletionStatus 与 residual risk 输入契约
+- K4 尚需固定 fix-only / commit-each Run 授权、提交真实性和 post-commit workspace 接纳契约
 - 外部 QA Skill 协议尚未验证；S2 在验证 Adapter 前只声明 manual checklist fallback
 
 ## 13. 代码风格示例（仓库抽样）
@@ -102,12 +102,12 @@ Human Command 生命周期由 Session 的 command/run 与 command/done 记录；
   - 结构性首行（截断）：`export const name = 'dev-harness-dsh-v0-fixture'`
 - `src/audit.ts`
   - 结构性首行（截断）：`const AUDIT_RUN_ID = /^[A-Za-z0-9._-]+$/u`
-- `src/commands.ts`
-  - 结构性首行（截断）：`type RunState,`
+- `src/autofix.ts`
+  - 结构性首行（截断）：`export const AUTO_FIX_CONTRACT_VERSION = 1 as const`
 - `src/index.ts`
   - 结构性首行（截断）：`export * from './commands.js'`
 - `src/orchestrator.ts`
-  - 结构性首行（截断）：`type AuditAdapter,`
+  - 结构性首行（截断）：`export class OrchestratorError extends Error`
 
 ## 14. 复盘结论正式写入说明
 

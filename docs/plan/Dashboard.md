@@ -4,10 +4,10 @@
 
 ## 1. 进度快照
 
-- **核心阶段**：K3 Auto Fix 队列与恢复（🚧 开发中）
-- **当前瓶颈**：K2 已提供版本化 Audit Adapter、mutation lease/checkpoint 与 Finding Router；K3 尚未固定 Auto Fix CompletionStatus Adapter 和逐项队列恢复契约
+- **核心阶段**：K4 提交授权模型（🚧 开发中）
+- **当前瓶颈**：K3 已提供 fix-only Auto Fix Adapter、逐 Finding mutation lease/checkpoint 与恢复队列；K4 尚未把 `fix-only` / `commit-each` 授权固定到 Run 和提交证据合同
 - **首版目标**：完成 Audit → Finding Router → Auto Fix → Full Verification → QA → Final Reconciliation → Report 的可恢复编排闭环
-- **需求状态**：MVP 需求已整理；DSH 目标版本固定为 rc.8，V0、K1、K2 已完成，生产编排进入 K3
+- **需求状态**：MVP 需求已整理；DSH 目标版本固定为 rc.8，V0、K1、K2、K3 已完成，生产编排进入 K4
 
 ## 2. 当前产品目标
 
@@ -22,8 +22,8 @@
 | **V0 — DSH 集成面调研** | 🔴 P0 | ✅ 已完成 | [Task V0](TaskDetails.md#task-v0) |
 | **K1 — Plugin Skeleton 与状态基线** | 🔴 P0 | ✅ 已完成 | [Task K1](TaskDetails.md#task-k1) |
 | **K2 — Audit Orchestration 与 Router** | 🔴 P0 | ✅ 已完成 | [Task K2](TaskDetails.md#task-k2) |
-| **K3 — Auto Fix 队列与恢复** | 🔴 P0 | 🚧 开发中 | [Task K3](TaskDetails.md#task-k3) |
-| **K4 — 提交授权模型** | 🔴 P0 | 📋 规划中 | [Task K4](TaskDetails.md#task-k4) |
+| **K3 — Auto Fix 队列与恢复** | 🔴 P0 | ✅ 已完成 | [Task K3](TaskDetails.md#task-k3) |
+| **K4 — 提交授权模型** | 🔴 P0 | 🚧 开发中 | [Task K4](TaskDetails.md#task-k4) |
 | **S1 — Full Verification** | 🟡 P1 | 📋 规划中 | [Task S1](TaskDetails.md#task-s1) |
 | **S2 — QA Adapter 与失败闭环** | 🟡 P1 | 📋 规划中 | [Task S2](TaskDetails.md#task-s2) |
 | **S3 — Final Reconciliation** | 🟡 P1 | 📋 规划中 | [Task S3](TaskDetails.md#task-s3) |
@@ -45,8 +45,8 @@
 
 ## 5. 当前缺口与起手任务
 
-1. **K3 — Auto Fix 队列与恢复**（🔴 P0，🚧 开发中）：消费 K2 的 confirmed defect 队列，以独立 Auto Fix Run 和权威 CompletionStatus 逐项推进。
-2. **K4 — 提交授权模型**（🔴 P0）：等待 K3 固定修改/验证完成边界后，把 `fix-only` / `commit-each` 授权固化到 Run。
+1. **K4 — 提交授权模型**（🔴 P0，🚧 开发中）：在 K3 的权威完成边界上固化 `fix-only` / `commit-each` Run 授权和提交证据。
+2. **S1 — Full Verification**（🟡 P1）：等待 K4 固定工作区/HEAD 接纳规则后，调度项目权威 `harness:full`。
 
 > 起手顺序：V0 → K1 → K2 → K3 → K4 → S1 → S2 → S3 → S4。
 
@@ -61,4 +61,4 @@
 
 ---
 
-*最后更新：2026-08-20（Task K2 完成，Task K3 启动）*
+*最后更新：2026-08-20（Task K3 完成，Task K4 启动）*

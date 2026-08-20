@@ -1,17 +1,17 @@
 # dev-harness-dsh
 
 ## 项目简介
-dev-harness-dsh 把 Audit、Auto Fix、验证、QA 与最终复核编排为可恢复运行；V0、K1 与 Audit/Router K2 已完成，当前进入 Auto Fix 队列与恢复
+dev-harness-dsh 把 Audit、Auto Fix、验证、QA 与最终复核编排为可恢复运行；V0、K1、K2、K3 已完成，当前进入提交授权模型
 
 ## 编程语言
-TypeScript
+JavaScript, TypeScript
 
 ## 构建系统
 npm / package.json, pnpm
 
 ## 核心模块
-- src — 生产 Plugin、Human Command、Skill preflight 与原子 Run State
-- tests — 生产生命周期、命令、状态、漂移和恢复自动化
+- src — 生产 Plugin、Human Command、Audit/Auto Fix Adapter、可恢复 Orchestrator 与原子 Run State
+- tests — 生产生命周期、命令、状态、CompletionStatus、漂移和恢复自动化
 - docs/product/REQUIREMENTS.md — MVP 产品边界与验收口径
 - docs/plan — 当前状态看板与任务执行层
 - docs/integration/DSH_API_BASELINE.md — rc.8 集成事实、证据等级与停止线
