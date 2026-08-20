@@ -109,7 +109,11 @@ export function validateFinalReconciliationObservation(
   const finishedAt = optionalTimestamp(record, 'finishedAt')
   const evidenceRef = optionalString(record, 'evidenceRef')
   const blockerRef = optionalString(record, 'blockerRef')
-  const findings = findingObservations(record.findings, expected.originalFindingIds, registryRef)
+  const findings = findingObservations(
+    record.findings,
+    executionStatus === 'COMPLETED' ? expected.originalFindingIds : [],
+    registryRef,
+  )
   const businessDirtyFiles = uniqueStrings(record.businessDirtyFiles, 'businessDirtyFiles')
   const auditOutputs = outputs(record.auditOutputs, posix.dirname(registryRef))
   if (record.workspaceVerified !== true || record.quiescent !== true) {

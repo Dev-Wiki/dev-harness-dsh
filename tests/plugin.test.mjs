@@ -74,3 +74,24 @@ test('QA registration accepts only named verified Adapters and owns their lifecy
     await ctx.fiber.dispose()
   }
 })
+
+test('Final Reconciliation registration is singular and fiber-owned', async () => {
+  const ctx = new Context()
+  await ctx.plugin(Commands)
+  await ctx.plugin(SkillRegistry)
+  const fiber = await ctx.plugin(Plugin)
+  const adapter = { name: 'fixture-reconciliation', async start() {}, async resume() {} }
+  try {
+    const unregister = ctx.devHarness.registerFinalReconciliationAdapter(adapter)
+    assert.throws(
+      () => ctx.devHarness.registerFinalReconciliationAdapter(adapter),
+      /already registered/u,
+    )
+    unregister()
+    const unregisterAgain = ctx.devHarness.registerFinalReconciliationAdapter(adapter)
+    unregisterAgain()
+  } finally {
+    await fiber.dispose()
+    await ctx.fiber.dispose()
+  }
+})

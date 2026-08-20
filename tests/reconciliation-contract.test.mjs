@@ -72,7 +72,7 @@ test('rejects reused snapshots, missing identities, stale completion, and false 
     /cannot contain stale/u,
   )
   assert.throws(
-    () => validateFinalReconciliationObservation(observation({ executionStatus: 'RUNNING' }), expected),
+    () => validateFinalReconciliationObservation(observation({ executionStatus: 'RUNNING', findings: [] }), expected),
     /must not claim terminal/u,
   )
 })

@@ -4,11 +4,18 @@ import type {} from '@deepseek-ai/dsh-skill'
 import z from '@deepseek-ai/schemastery'
 
 import { registerCommands, resumeCommand, runCommand, statusCommand } from './commands.js'
-import { advanceAuditRun, advanceFullVerification, advanceQaRun, advanceRemediationRun } from './orchestrator.js'
+import {
+  advanceAuditRun,
+  advanceFinalReconciliation,
+  advanceFullVerification,
+  advanceQaRun,
+  advanceRemediationRun,
+} from './orchestrator.js'
 import type { AuditAdapter } from './audit.js'
 import type { AutoFixAdapter } from './autofix.js'
 import type { FullVerificationAdapter } from './verification.js'
 import type { QaAdapter } from './qa/index.js'
+import type { FinalReconciliationAdapter } from './reconciliation.js'
 
 export * from './commands.js'
 export * from './authorization.js'
@@ -46,6 +53,7 @@ export class DevHarnessRuntime extends Service {
   private autoFixAdapter?: AutoFixAdapter
   private fullVerificationAdapter?: FullVerificationAdapter
   private readonly qaAdapters = new Map<string, QaAdapter>()
+  private finalReconciliationAdapter?: FinalReconciliationAdapter
 
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'devHarness')
@@ -74,11 +82,16 @@ export class DevHarnessRuntime extends Service {
     const autoFixAdapter = this.autoFixAdapter
     const fullVerificationAdapter = this.fullVerificationAdapter
     const qaAdapters = [...this.qaAdapters.values()]
+    const finalReconciliationAdapter = this.finalReconciliationAdapter
     return resumeCommand(
       this.ctx,
       this.requiredSkills,
       invocation,
-      adapter === undefined && autoFixAdapter === undefined && fullVerificationAdapter === undefined && qaAdapters.length === 0
+      adapter === undefined
+        && autoFixAdapter === undefined
+        && fullVerificationAdapter === undefined
+        && qaAdapters.length === 0
+        && finalReconciliationAdapter === undefined
         ? undefined
         : (state, signal) => {
             if (['PREFLIGHT', 'AUDIT'].includes(state.phase)) {
@@ -112,7 +125,26 @@ export class DevHarnessRuntime extends Service {
               })
             }
             if (state.phase === 'QA') {
+              const latestQa = state.qa.runs.find(run => run.attempt === state.qa.currentAttempt)
+              if (latestQa?.resultStatus === 'PASS') {
+                if (finalReconciliationAdapter === undefined) return Promise.resolve(state)
+                return advanceFinalReconciliation({
+                  cwd: state.repo.worktreeRoot,
+                  runId: state.runId,
+                  signal,
+                  adapter: finalReconciliationAdapter,
+                })
+              }
               return advanceQaRun({ cwd: state.repo.worktreeRoot, runId: state.runId, signal, adapters: qaAdapters })
+            }
+            if (state.phase === 'FINAL_RECONCILE') {
+              if (finalReconciliationAdapter === undefined) return Promise.resolve(state)
+              return advanceFinalReconciliation({
+                cwd: state.repo.worktreeRoot,
+                runId: state.runId,
+                signal,
+                adapter: finalReconciliationAdapter,
+              })
             }
             return Promise.resolve(state)
           },
@@ -180,6 +212,26 @@ export class DevHarnessRuntime extends Service {
 
   advanceQa(cwd: string, runId: string, signal: AbortSignal) {
     return advanceQaRun({ cwd, runId, signal, adapters: [...this.qaAdapters.values()] })
+  }
+
+  registerFinalReconciliationAdapter(adapter: FinalReconciliationAdapter): () => void {
+    if (this.finalReconciliationAdapter !== undefined) {
+      throw new Error('a Final Reconciliation Adapter is already registered')
+    }
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(adapter.name)) {
+      throw new TypeError('invalid Final Reconciliation Adapter name')
+    }
+    this.finalReconciliationAdapter = adapter
+    return () => {
+      if (this.finalReconciliationAdapter === adapter) this.finalReconciliationAdapter = undefined
+    }
+  }
+
+  advanceFinalReconciliation(cwd: string, runId: string, signal: AbortSignal) {
+    if (this.finalReconciliationAdapter === undefined) {
+      throw new Error('no Final Reconciliation Adapter is registered')
+    }
+    return advanceFinalReconciliation({ cwd, runId, signal, adapter: this.finalReconciliationAdapter })
   }
 }
 

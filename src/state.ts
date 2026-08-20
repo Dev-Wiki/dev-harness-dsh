@@ -31,7 +31,7 @@ const RUN_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/u
 const LOCKFILE_CANDIDATES = ['pnpm-lock.yaml', 'package-lock.json', 'yarn.lock'] as const
 const CONTEXT_FILES = ['README.md', 'AGENTS.md', 'ARCHITECTURE.md', 'HARNESS.md'] as const
 
-export const RUN_STATE_SCHEMA_VERSION = 3 as const
+export const RUN_STATE_SCHEMA_VERSION = 4 as const
 export const MAX_QA_ATTEMPTS = 3 as const
 
 export const PHASES = [
@@ -250,6 +250,34 @@ export interface QaLease {
   status: 'OPEN'
 }
 
+export interface FinalReconciliationLease {
+  reconciliationRunId: string
+  adapterName: string
+  allowedRoot: string
+  originalAuditRunId: string
+  originalSnapshotRef: string
+  originalFindingIds: string[]
+  beforeFingerprint: string
+  beforeChangedPaths: Record<string, string>
+  status: 'OPEN'
+}
+
+export interface FinalReconciliationRef {
+  reconciliationRunId: string
+  revision: number
+  executionStatus: string
+  runRef: string
+  originalAuditRunId: string
+  originalSnapshotRef: string
+  freshSnapshotRef: string
+  registryRef: string
+  reportRef: string
+  workspaceFingerprint: string
+  evidenceRef?: string
+  blockerRef?: string
+  findings: Array<{ findingId: string; status: string; evidenceRef: string }>
+}
+
 export interface RunBlocker {
   code: string
   message: string
@@ -313,6 +341,8 @@ export interface RunState {
   qaLease?: QaLease
   qa: QaState
   finalAuditRunId?: string
+  finalReconciliationLease?: FinalReconciliationLease
+  finalReconciliation?: FinalReconciliationRef
   blocker?: RunBlocker
 }
 
@@ -895,6 +925,57 @@ function parseRunState(value: unknown): RunState {
           status: 'OPEN' as const,
         }
       })()
+  const finalReconciliationLeaseRecord = value.finalReconciliationLease
+  const finalReconciliationLease = finalReconciliationLeaseRecord === undefined
+    ? undefined
+    : (() => {
+        if (!isRecord(finalReconciliationLeaseRecord) || finalReconciliationLeaseRecord.status !== 'OPEN') {
+          throw new Error('finalReconciliationLease must be an OPEN lease object')
+        }
+        return {
+          reconciliationRunId: requireString(finalReconciliationLeaseRecord, 'reconciliationRunId'),
+          adapterName: requireString(finalReconciliationLeaseRecord, 'adapterName'),
+          allowedRoot: requireString(finalReconciliationLeaseRecord, 'allowedRoot'),
+          originalAuditRunId: requireString(finalReconciliationLeaseRecord, 'originalAuditRunId'),
+          originalSnapshotRef: requireString(finalReconciliationLeaseRecord, 'originalSnapshotRef'),
+          originalFindingIds: parseStringArray(finalReconciliationLeaseRecord, 'originalFindingIds'),
+          beforeFingerprint: requireString(finalReconciliationLeaseRecord, 'beforeFingerprint'),
+          beforeChangedPaths: parseStringRecord(finalReconciliationLeaseRecord, 'beforeChangedPaths'),
+          status: 'OPEN' as const,
+        }
+      })()
+  const finalReconciliationRecord = value.finalReconciliation
+  const finalReconciliation = finalReconciliationRecord === undefined
+    ? undefined
+    : (() => {
+        if (!isRecord(finalReconciliationRecord)) throw new Error('finalReconciliation must be an object')
+        return {
+          reconciliationRunId: requireString(finalReconciliationRecord, 'reconciliationRunId'),
+          revision: requireInteger(finalReconciliationRecord, 'revision'),
+          executionStatus: requireString(finalReconciliationRecord, 'executionStatus'),
+          runRef: requireString(finalReconciliationRecord, 'runRef'),
+          originalAuditRunId: requireString(finalReconciliationRecord, 'originalAuditRunId'),
+          originalSnapshotRef: requireString(finalReconciliationRecord, 'originalSnapshotRef'),
+          freshSnapshotRef: requireString(finalReconciliationRecord, 'freshSnapshotRef'),
+          registryRef: requireString(finalReconciliationRecord, 'registryRef'),
+          reportRef: requireString(finalReconciliationRecord, 'reportRef'),
+          workspaceFingerprint: requireString(finalReconciliationRecord, 'workspaceFingerprint'),
+          ...(optionalString(finalReconciliationRecord, 'evidenceRef') === undefined
+            ? {}
+            : { evidenceRef: optionalString(finalReconciliationRecord, 'evidenceRef') }),
+          ...(optionalString(finalReconciliationRecord, 'blockerRef') === undefined
+            ? {}
+            : { blockerRef: optionalString(finalReconciliationRecord, 'blockerRef') }),
+          findings: requireArray(finalReconciliationRecord, 'findings').map((entry, index) => {
+            if (!isRecord(entry)) throw new Error(`finalReconciliation.findings[${index}] must be an object`)
+            return {
+              findingId: requireString(entry, 'findingId'),
+              status: requireString(entry, 'status'),
+              evidenceRef: requireString(entry, 'evidenceRef'),
+            }
+          }),
+        }
+      })()
   const auditLeaseRecord = value.auditLease
   const auditLease = auditLeaseRecord === undefined
     ? undefined
@@ -1089,6 +1170,8 @@ function parseRunState(value: unknown): RunState {
     ...(qaLease === undefined ? {} : { qaLease }),
     qa,
     ...optionalString(value, 'finalAuditRunId') === undefined ? {} : { finalAuditRunId: optionalString(value, 'finalAuditRunId') },
+    ...(finalReconciliationLease === undefined ? {} : { finalReconciliationLease }),
+    ...(finalReconciliation === undefined ? {} : { finalReconciliation }),
     ...parseOptionalRef(value, 'blocker', ['code', 'message']) === undefined
       ? {}
       : { blocker: parseOptionalRef(value, 'blocker', ['code', 'message']) as unknown as RunBlocker },

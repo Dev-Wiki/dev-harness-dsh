@@ -25,6 +25,12 @@ import {
   type QaObservation,
 } from './qa/index.js'
 import {
+  FinalReconciliationContractError,
+  validateFinalReconciliationObservation,
+  type FinalReconciliationAdapter,
+  type FinalReconciliationObservation,
+} from './reconciliation.js'
+import {
   FULL_VERIFICATION_COMMAND,
   FullVerificationContractError,
   validateFullVerificationObservation,
@@ -769,6 +775,247 @@ export async function advanceQaRun(options: {
       }
     },
   })
+}
+
+export async function advanceFinalReconciliation(options: {
+  readonly cwd: string
+  readonly runId: string
+  readonly adapter: FinalReconciliationAdapter
+  readonly signal: AbortSignal
+}): Promise<RunState> {
+  throwIfAborted(options.signal)
+  let state = await loadRun(options.cwd, options.runId)
+  if (!['QA', 'FINAL_RECONCILE'].includes(state.phase)) {
+    throw new OrchestratorError(`Final Reconciliation cannot advance from phase ${state.phase}`)
+  }
+  const latestQa = state.qa.runs.find(run => run.attempt === state.qa.currentAttempt)
+  if (latestQa?.executionStatus !== 'COMPLETED' || latestQa.resultStatus !== 'PASS') {
+    throw new OrchestratorError('Final Reconciliation requires an authoritative QA PASS')
+  }
+  if (state.fullVerification?.executionStatus !== 'COMPLETED' || state.fullVerification.status !== 'PASS') {
+    throw new OrchestratorError('Final Reconciliation requires the current Full Verification PASS')
+  }
+  if (
+    state.phase === 'QA'
+    && (
+      state.fullVerification.workspaceFingerprint !== state.repo.worktreeFingerprint
+      || latestQa.workspaceFingerprint !== state.repo.worktreeFingerprint
+    )
+  ) throw new OrchestratorError('Final Reconciliation requires QA and Full Verification on the current workspace')
+  if (state.qa.findings.some(finding => finding.status !== 'RESOLVED')) {
+    throw new OrchestratorError('Final Reconciliation cannot start with unresolved QaFindings')
+  }
+  if (
+    state.auditRunId === undefined
+    || state.auditResult?.status !== 'COMPLETED'
+    || state.auditResult.executionStatus !== 'COMPLETED'
+  ) throw new OrchestratorError('Final Reconciliation requires the completed initial Audit')
+  const originalAuditRunId = state.auditRunId
+  const originalAuditResult = state.auditResult
+  if (
+    state.phase === 'FINAL_RECONCILE'
+    && state.status === 'RUNNING'
+    && state.finalReconciliation?.executionStatus === 'COMPLETED'
+  ) return state
+  if (['PAUSED', 'BLOCKED'].includes(state.status)) {
+    state = await updateRun({
+      cwd: options.cwd,
+      runId: state.runId,
+      expectedRevision: state.revision,
+      mutate(next) {
+        next.status = 'RUNNING'
+        delete next.blocker
+      },
+    })
+  }
+  if (['FAILED', 'CANCELLED', 'DONE', 'DONE_WITH_CONCERNS', 'NEEDS_USER'].includes(state.status)) {
+    throw new OrchestratorError(`Final Reconciliation cannot advance a ${state.status} run`)
+  }
+
+  let before: WorktreeBoundary
+  if (state.finalReconciliationLease === undefined) {
+    await validateResume(state, options.cwd)
+    before = await captureWorktreeBoundary(options.cwd)
+    const reconciliationRunId = state.finalReconciliation?.reconciliationRunId
+      ?? stableReconciliationRunId(state.runId, originalAuditResult.snapshotRef, before.fingerprint)
+    const allowedRoot = await resolveAuditRoot(state.repo.worktreeRoot)
+    state = await updateRun({
+      cwd: options.cwd,
+      runId: state.runId,
+      expectedRevision: state.revision,
+      mutate(next) {
+        next.phase = 'FINAL_RECONCILE'
+        next.finalAuditRunId = reconciliationRunId
+        next.finalReconciliationLease = {
+          reconciliationRunId,
+          adapterName: options.adapter.name,
+          allowedRoot,
+          originalAuditRunId,
+          originalSnapshotRef: originalAuditResult.snapshotRef,
+          originalFindingIds: state.findings.map(finding => finding.findingId).sort(),
+          beforeFingerprint: before.fingerprint,
+          beforeChangedPaths: { ...before.changedPaths },
+          status: 'OPEN',
+        }
+      },
+    })
+  } else {
+    if (state.finalReconciliationLease.adapterName !== options.adapter.name) {
+      throw new OrchestratorError('open Final Reconciliation lease belongs to another Adapter')
+    }
+    before = {
+      worktreeRoot: state.repo.worktreeRoot,
+      fingerprint: state.finalReconciliationLease.beforeFingerprint,
+      changedPaths: state.finalReconciliationLease.beforeChangedPaths,
+    }
+  }
+
+  const lease = state.finalReconciliationLease
+  if (lease === undefined) throw new OrchestratorError('Final Reconciliation lease was not persisted')
+  const request = {
+    cwd: state.repo.worktreeRoot,
+    orchestrationRunId: state.runId,
+    reconciliationRunId: lease.reconciliationRunId,
+    originalAuditRunId: lease.originalAuditRunId,
+    originalSnapshotRef: lease.originalSnapshotRef,
+    originalFindingIds: lease.originalFindingIds,
+    expectedHead: state.repo.head,
+    expectedBranch: state.repo.branch,
+    expectedWorkspaceFingerprint: lease.beforeFingerprint,
+    contextFingerprint: state.contextFingerprint,
+    signal: options.signal,
+  }
+  throwIfAborted(options.signal)
+  const rawObservation = state.finalReconciliation === undefined
+    ? await options.adapter.start(request)
+    : await options.adapter.resume({
+        ...request,
+        expectedRevision: state.finalReconciliation.revision,
+        expectedRunRef: state.finalReconciliation.runRef,
+        expectedFreshSnapshotRef: state.finalReconciliation.freshSnapshotRef,
+      })
+  throwIfAborted(options.signal)
+  const observation = validateFinalReconciliationObservation(rawObservation, {
+    runId: lease.reconciliationRunId,
+    repositoryRoot: state.repo.worktreeRoot,
+    head: state.repo.head,
+    branch: state.repo.branch,
+    workspaceFingerprint: lease.beforeFingerprint,
+    contextFingerprint: state.contextFingerprint,
+    originalAuditRunId: lease.originalAuditRunId,
+    originalSnapshotRef: lease.originalSnapshotRef,
+    originalFindingIds: lease.originalFindingIds,
+  })
+  assertMonotonicReconciliation(state, observation)
+  const after = await captureWorktreeBoundary(options.cwd)
+  const changedPaths = diffWorktreeBoundaries(before, after)
+  assertFinalReconciliationWorkspace(lease.allowedRoot, before, after, changedPaths, observation)
+  state = await adoptWorktreeBoundary({
+    cwd: options.cwd,
+    runId: state.runId,
+    expectedRevision: state.revision,
+    before,
+    boundary: after,
+    acceptedPaths: changedPaths,
+  })
+  return await updateRun({
+    cwd: options.cwd,
+    runId: state.runId,
+    expectedRevision: state.revision,
+    mutate(next) {
+      next.phase = 'FINAL_RECONCILE'
+      next.finalAuditRunId = observation.runId
+      next.finalReconciliation = {
+        reconciliationRunId: observation.runId,
+        revision: observation.revision,
+        executionStatus: observation.executionStatus,
+        runRef: observation.runRef,
+        originalAuditRunId: observation.originalAuditRunId,
+        originalSnapshotRef: observation.originalSnapshotRef,
+        freshSnapshotRef: observation.freshSnapshotRef,
+        registryRef: observation.registryRef,
+        reportRef: observation.reportRef,
+        workspaceFingerprint: after.fingerprint,
+        ...(observation.evidenceRef === undefined ? {} : { evidenceRef: observation.evidenceRef }),
+        ...(observation.blockerRef === undefined ? {} : { blockerRef: observation.blockerRef }),
+        findings: observation.findings.map(finding => ({ ...finding })),
+      }
+      delete next.finalReconciliationLease
+      delete next.blocker
+      if (observation.executionStatus === 'RUNNING') {
+        next.status = 'PAUSED'
+      } else if (observation.executionStatus === 'BLOCKED') {
+        next.status = 'BLOCKED'
+        next.blocker = { code: 'FINAL_RECONCILIATION_BLOCKED', message: observation.blockerRef! }
+      } else if (observation.executionStatus === 'FAILED') {
+        next.status = 'FAILED'
+        next.blocker = { code: 'FINAL_RECONCILIATION_FAILED', message: observation.evidenceRef! }
+      } else if (observation.executionStatus === 'CANCELLED') {
+        next.status = 'CANCELLED'
+      } else {
+        next.status = 'RUNNING'
+      }
+    },
+  })
+}
+
+function stableReconciliationRunId(runId: string, originalSnapshotRef: string, workspaceFingerprint: string): string {
+  const digest = createHash('sha256')
+    .update(`${runId}\0${originalSnapshotRef}\0${workspaceFingerprint}`)
+    .digest('hex')
+    .slice(0, 16)
+  return `reconcile-${digest}`
+}
+
+function assertMonotonicReconciliation(state: RunState, observation: FinalReconciliationObservation): void {
+  const previous = state.finalReconciliation
+  if (previous === undefined) return
+  if (observation.runId !== previous.reconciliationRunId || observation.runRef !== previous.runRef) {
+    throw new FinalReconciliationContractError('Final Reconciliation Adapter changed run identity')
+  }
+  if (observation.revision < previous.revision) {
+    throw new FinalReconciliationContractError('Final Reconciliation revision moved backwards')
+  }
+  if (observation.revision === previous.revision && observation.executionStatus !== previous.executionStatus) {
+    throw new FinalReconciliationContractError('Final Reconciliation changed status at the same revision')
+  }
+  if (observation.freshSnapshotRef !== previous.freshSnapshotRef) {
+    throw new FinalReconciliationContractError('Final Reconciliation changed fresh snapshot during resume')
+  }
+}
+
+function assertFinalReconciliationWorkspace(
+  allowedRoot: string,
+  before: WorktreeBoundary,
+  after: WorktreeBoundary,
+  changedPaths: readonly string[],
+  observation: FinalReconciliationObservation,
+): void {
+  if (!observation.registryRef.startsWith(`${allowedRoot}/`) || !observation.reportRef.startsWith(`${allowedRoot}/`)) {
+    throw new FinalReconciliationContractError('Final Reconciliation output root does not match the mutation lease')
+  }
+  for (const path of changedPaths) {
+    if (!path.startsWith(`${allowedRoot}/`)) {
+      throw new FinalReconciliationContractError(`Final Reconciliation mutated a path outside its output root: ${path}`)
+    }
+  }
+  const outputMap = new Map(observation.auditOutputs.map(output => [output.path, output.fingerprint]))
+  for (const path of changedPaths) {
+    if (outputMap.get(path) !== after.changedPaths[path]) {
+      throw new FinalReconciliationContractError(`Final Reconciliation output fingerprint mismatch: ${path}`)
+    }
+  }
+  for (const [path, fingerprint] of outputMap) {
+    if (after.changedPaths[path] !== fingerprint) {
+      throw new FinalReconciliationContractError(`Final Reconciliation reported a non-current output: ${path}`)
+    }
+  }
+  const businessDirtyFiles = Object.keys(after.changedPaths)
+    .filter(path => !path.startsWith(`${allowedRoot}/`))
+    .sort()
+  if (JSON.stringify(businessDirtyFiles) !== JSON.stringify([...observation.businessDirtyFiles].sort())) {
+    throw new FinalReconciliationContractError('Final Reconciliation business dirty-file scope does not match Git')
+  }
 }
 
 const MANUAL_QA_CHECKLIST = Object.freeze([
