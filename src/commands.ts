@@ -51,6 +51,7 @@ export async function runCommand(
   ctx: Context,
   requiredSkills: readonly string[],
   invocation: CommandInvocation,
+  advance?: (state: RunState, signal: AbortSignal) => Promise<RunState>,
 ): Promise<CommandResult> {
   requireNoArgs(invocation.rawInput, 'harness-run')
   const cwd = requireCwd(invocation)
@@ -69,13 +70,14 @@ export async function runCommand(
       next.phase = 'PREFLIGHT'
     },
   })
-  return success(preflight)
+  return success(advance === undefined ? preflight : await advance(preflight, invocation.signal))
 }
 
 export async function resumeCommand(
   ctx: Context,
   requiredSkills: readonly string[],
   invocation: CommandInvocation,
+  advance?: (state: RunState, signal: AbortSignal) => Promise<RunState>,
 ): Promise<CommandResult> {
   const runId = requireOneArg(invocation.rawInput, 'harness-resume')
   const cwd = requireCwd(invocation)
@@ -87,17 +89,21 @@ export async function resumeCommand(
     signal: invocation.signal,
     required: requiredSkills,
   })
-  if (state.status === 'RUNNING') return success(state)
-  const resumed = await updateRun({
-    cwd,
-    runId,
-    expectedRevision: state.revision,
-    mutate(next) {
-      next.status = 'RUNNING'
-      delete next.blocker
-    },
-  })
-  return success(resumed)
+  const resumed = state.status === 'RUNNING'
+    ? state
+    : await updateRun({
+        cwd,
+        runId,
+        expectedRevision: state.revision,
+        mutate(next) {
+          next.status = 'RUNNING'
+          delete next.blocker
+        },
+      })
+  const final = advance !== undefined && ['PREFLIGHT', 'AUDIT'].includes(resumed.phase)
+    ? await advance(resumed, invocation.signal)
+    : resumed
+  return success(final)
 }
 
 export async function statusCommand(invocation: CommandInvocation): Promise<CommandResult> {

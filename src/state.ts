@@ -104,6 +104,7 @@ export interface RepositoryIdentity {
   worktreeRoot: string
   privateGitDir: string
   head: string
+  branch: string
   worktreeFingerprint: string
 }
 
@@ -149,6 +150,34 @@ export interface RunBlocker {
   message: string
 }
 
+export interface AuditMutationLease {
+  auditRunId: string
+  adapterName: string
+  allowedRoot: string
+  beforeFingerprint: string
+  beforeChangedPaths: Record<string, string>
+  status: 'OPEN'
+}
+
+export interface AuditResultRef {
+  status: string
+  executionStatus: string
+  revision: number
+  snapshotRef: string
+  registryRef: string
+  reportRef: string
+  crossModuleStatus: string
+}
+
+export interface AuditWorkspaceCheckpoint {
+  auditRunId: string
+  adapterRevision: number
+  snapshotRef: string
+  previousFingerprint: string
+  acceptedFingerprint: string
+  outputs: Array<{ path: string; fingerprint: string }>
+}
+
 export interface RunState {
   schemaVersion: typeof RUN_STATE_SCHEMA_VERSION
   revision: number
@@ -161,6 +190,9 @@ export interface RunState {
   createdAt: string
   updatedAt: string
   auditRunId?: string
+  auditLease?: AuditMutationLease
+  auditResult?: AuditResultRef
+  auditCheckpoint?: AuditWorkspaceCheckpoint
   currentFinding?: string
   findings: FindingRouteRef[]
   fixRuns: AutoFixRunRef[]
@@ -381,6 +413,7 @@ export async function captureWorktreeBoundary(cwd: string): Promise<WorktreeBoun
     before.worktreeRoot !== after.worktreeRoot
     || before.privateGitDir !== after.privateGitDir
     || before.head !== after.head
+    || before.branch !== after.branch
     || before.worktreeFingerprint !== after.worktreeFingerprint
   ) {
     throw new RunStateError('WORKTREE_MISMATCH', 'worktree changed while capturing a mutation boundary')
@@ -412,6 +445,7 @@ export async function captureRepositoryIdentity(cwd: string): Promise<Repository
     worktreeRoot,
     privateGitDir,
     head: await gitText(cwd, ['rev-parse', '--verify', 'HEAD^{commit}']),
+    branch: await gitText(cwd, ['rev-parse', '--abbrev-ref', 'HEAD']),
     worktreeFingerprint: await fingerprintWorktree(worktreeRoot),
   }
 }
@@ -550,6 +584,14 @@ function parseOptionalRef(
   ])
 }
 
+function parseStringRecord(record: Record<string, unknown>, key: string): Record<string, string> {
+  const value = requireRecord(record, key)
+  return Object.fromEntries(Object.entries(value).map(([name, item]) => {
+    if (typeof item !== 'string' || item.length === 0) throw new Error(`${key}.${name} must be a non-empty string`)
+    return [name, item]
+  }))
+}
+
 function parseRefArray(
   record: Record<string, unknown>,
   key: string,
@@ -600,6 +642,54 @@ function parseRunState(value: unknown): RunState {
             : { runRef: optionalString(qaRecord, 'runRef') },
         }
       })()
+  const auditLeaseRecord = value.auditLease
+  const auditLease = auditLeaseRecord === undefined
+    ? undefined
+    : (() => {
+        if (!isRecord(auditLeaseRecord) || auditLeaseRecord.status !== 'OPEN') {
+          throw new Error('auditLease must be an OPEN lease object')
+        }
+        return {
+          auditRunId: requireString(auditLeaseRecord, 'auditRunId'),
+          adapterName: requireString(auditLeaseRecord, 'adapterName'),
+          allowedRoot: requireString(auditLeaseRecord, 'allowedRoot'),
+          beforeFingerprint: requireString(auditLeaseRecord, 'beforeFingerprint'),
+          beforeChangedPaths: parseStringRecord(auditLeaseRecord, 'beforeChangedPaths'),
+          status: 'OPEN' as const,
+        }
+      })()
+  const auditResultRecord = value.auditResult
+  const auditResult = auditResultRecord === undefined
+    ? undefined
+    : (() => {
+        if (!isRecord(auditResultRecord)) throw new Error('auditResult must be an object')
+        return {
+          status: requireString(auditResultRecord, 'status'),
+          executionStatus: requireString(auditResultRecord, 'executionStatus'),
+          revision: requireInteger(auditResultRecord, 'revision'),
+          snapshotRef: requireString(auditResultRecord, 'snapshotRef'),
+          registryRef: requireString(auditResultRecord, 'registryRef'),
+          reportRef: requireString(auditResultRecord, 'reportRef'),
+          crossModuleStatus: requireString(auditResultRecord, 'crossModuleStatus'),
+        }
+      })()
+  const auditCheckpointRecord = value.auditCheckpoint
+  const auditCheckpoint = auditCheckpointRecord === undefined
+    ? undefined
+    : (() => {
+        if (!isRecord(auditCheckpointRecord)) throw new Error('auditCheckpoint must be an object')
+        return {
+          auditRunId: requireString(auditCheckpointRecord, 'auditRunId'),
+          adapterRevision: requireInteger(auditCheckpointRecord, 'adapterRevision'),
+          snapshotRef: requireString(auditCheckpointRecord, 'snapshotRef'),
+          previousFingerprint: requireString(auditCheckpointRecord, 'previousFingerprint'),
+          acceptedFingerprint: requireString(auditCheckpointRecord, 'acceptedFingerprint'),
+          outputs: parseRefArray(auditCheckpointRecord, 'outputs', ['path', 'fingerprint']) as Array<{
+            path: string
+            fingerprint: string
+          }>,
+        }
+      })()
   return {
     schemaVersion: RUN_STATE_SCHEMA_VERSION,
     revision: requireInteger(value, 'revision'),
@@ -608,6 +698,7 @@ function parseRunState(value: unknown): RunState {
       worktreeRoot: requireString(repo, 'worktreeRoot'),
       privateGitDir: requireString(repo, 'privateGitDir'),
       head: requireString(repo, 'head'),
+      branch: requireString(repo, 'branch'),
       worktreeFingerprint: requireString(repo, 'worktreeFingerprint'),
     },
     contextFingerprint: requireString(value, 'contextFingerprint'),
@@ -628,6 +719,9 @@ function parseRunState(value: unknown): RunState {
     createdAt,
     updatedAt,
     ...optionalString(value, 'auditRunId') === undefined ? {} : { auditRunId: optionalString(value, 'auditRunId') },
+    ...(auditLease === undefined ? {} : { auditLease }),
+    ...(auditResult === undefined ? {} : { auditResult }),
+    ...(auditCheckpoint === undefined ? {} : { auditCheckpoint }),
     ...optionalString(value, 'currentFinding') === undefined ? {} : { currentFinding: optionalString(value, 'currentFinding') },
     findings: parseRefArray(value, 'findings', ['findingId', 'status', 'route'], ['handoffRef']) as unknown as FindingRouteRef[],
     fixRuns: parseRefArray(value, 'fixRuns', ['findingId', 'autoFixRunId', 'status'], ['residualRiskRef']) as unknown as AutoFixRunRef[],
@@ -719,6 +813,9 @@ export async function validateResume(
   }
   if (current.repo.head !== state.repo.head) {
     throw new RunStateError('HEAD_MISMATCH', 'HEAD commit changed')
+  }
+  if (current.repo.branch !== state.repo.branch) {
+    throw new RunStateError('HEAD_MISMATCH', 'Git branch changed')
   }
   if (current.contextFingerprint !== state.contextFingerprint) {
     throw new RunStateError('CONTEXT_MISMATCH', 'canonical Context fingerprint changed')
@@ -913,6 +1010,9 @@ function assertAdoptableEnvironment(
   }
   if (current.repo.head !== previous.repo.head) {
     throw new RunStateError('HEAD_MISMATCH', 'HEAD commit changed')
+  }
+  if (current.repo.branch !== previous.repo.branch) {
+    throw new RunStateError('HEAD_MISMATCH', 'Git branch changed')
   }
   if (current.contextFingerprint !== previous.contextFingerprint) {
     throw new RunStateError('CONTEXT_MISMATCH', 'canonical Context fingerprint changed')

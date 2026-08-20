@@ -72,6 +72,7 @@ test('creates private state with exact runtime dependencies and owner-only permi
   assert.equal(statePath, join(gitDir, 'dev-harness', 'dsh', state.runId, 'state.json'))
   assert.deepEqual(state.dependencies.packages, RUNTIME_DEPENDENCIES)
   assert.match(state.contextFingerprint, /^[a-f0-9]{64}$/u)
+  assert.equal(state.repo.branch, 'main')
   assert.deepEqual(await loadRun(cwd, state.runId), state)
   assert.deepEqual((await listRuns(cwd)).map(run => run.runId), [state.runId])
   assert.equal(await git(cwd, 'status', '--porcelain=v1', '--untracked-files=all'), '')
