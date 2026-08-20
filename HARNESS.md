@@ -4,7 +4,7 @@
 它定义可执行命令、运行条件和验证边界，不替代 `AGENTS.md` 中的行为、安全与修改约束。
 
 ## 项目类型
-DeepSeek Harness TypeScript Plugin 项目；Task V0、K1、K2、K3、K4、S1、S2、S3 已完成，Task S4 Run Summary 开发中
+DeepSeek Harness TypeScript Plugin 项目；Task V0、K1、K2、K3、K4、S1、S2、S3、S4 MVP 基线已完成
 
 ## 编译与启动问题排查
 - **WorkingDirectory**: repository root
@@ -32,7 +32,7 @@ DeepSeek Harness TypeScript Plugin 项目；Task V0、K1、K2、K3、K4、S1、S
 - **Preconditions**: 已执行 `pnpm install --frozen-lockfile --ignore-scripts`
 - **DeviceRequirement**: `none`
 - **Shell / Environment**: 项目兼容 shell；无 LLM/API 凭据要求；pack dry-run 需要可写 npm cache
-- **Evidence**: `package.json:28-32`；2026-08-20 本机执行生产测试，typecheck、Oxlint、59 个自动化用例 PASS；S3 收口后 canonical full 待 S4 一并复验
+- **Evidence**: `package.json:28-32`；2026-08-20 本机执行生产 full，typecheck、Oxlint、62 个自动化用例、build 与 pack dry-run PASS；tarball 38 个文件
 - **Status**: `confirmed`
 
 ### V0 fixture build
@@ -88,5 +88,5 @@ DeepSeek Harness TypeScript Plugin 项目；Task V0、K1、K2、K3、K4、S1、S
 - full: npm run harness:full
 
 ## 需人工确认
-- S4 尚需固定统一 Run Summary、权威引用完整性与 Overall 状态归并合同
+- 当前没有已验证的 external Skill 或 native browser/UI QA 协议；只有带运行证据并显式注册的 Adapter 可自动执行，否则安全降级为 manual `NEEDS_USER`
 - 外部 QA Skill 协议仍未验证；当前自动 QA Adapter 必须由集成方携带验证证据显式注册，否则只生成 manual checklist 并停在 `NEEDS_USER`

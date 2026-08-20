@@ -2,7 +2,7 @@
 
 > 本文档是 [Dashboard.md](Dashboard.md) 的执行层补充。产品边界与验收口径以 [MVP 需求](../product/REQUIREMENTS.md) 为准。
 >
-> **当前主题**：dev-harness-dsh MVP。Task V0、K1、K2、K3、K4、S1、S2、S3 已完成，Task S4 开发中；其他任务未经实现和验证证据不得标记完成。
+> **当前主题**：dev-harness-dsh MVP。Task V0、K1、K2、K3、K4、S1、S2、S3、S4 已完成；后续能力未经实现和验证证据不得标记可用。
 
 <a id="task-v0"></a>
 ## 0. 前置调研：DSH 集成面与工具链基线（Task V0）
@@ -315,8 +315,8 @@
 ### Task S4：统一 Run Summary
 
 - **优先级**：🟡 P1
-- **状态**：🚧 开发中
-- **估时**：S3 完成后评估
+- **状态**：✅ 已完成
+- **估时**：已完成（2026-08-20）
 - **依赖**：Task S3
 
 **目标**：
@@ -326,11 +326,20 @@
 - 正确生成 DONE、DONE_WITH_CONCERNS、BLOCKED、FAILED 等 Overall 状态；
 - 明确剩余风险和人工动作。
 
-**预计文件**：
+**实现文件**：
 
 - Create: `src/report.ts` — 统一结果模型和呈现；
 - Modify: `src/orchestrator.ts` — REPORT / DONE 阶段；
 - Test: `tests/orchestrator.test.ts` — 汇总完整性与状态归并。
+
+**完成证据（2026-08-20）**：
+
+- `src/report.ts` 固定 versioned Run Summary，只从持久化的 Audit、Auto Fix、commit、Full Verification、QA 与 Final Reconciliation 权威引用生成，不读取聊天文本或推断日志；
+- Summary 保存 authorization ref、初始/fresh snapshot、Registry/Report、每个修复 Run、commit evidence、verification run/evidence、QA attempts/QAF refs 和逐 Finding reconciliation 计数；
+- 无 residual risk、remaining Finding 或非修复 handoff 时归并 `DONE`；存在任一项时归并 `DONE_WITH_CONCERNS` 并保留对应引用；缺失 QA PASS、Full Verification PASS、Final Reconciliation 或未解决 QAF 时拒绝生成；
+- Run State schema v5 持久化 summary；加载和终态推进都会从权威 state 重算并逐字段核对，Overall 或引用被篡改时 fail closed；FINAL_RECONCILE → REPORT → DONE 使用两个原子 revision checkpoint；
+- `/harness-resume` 可完成纯汇总阶段，`/harness-status` 在 summary 存在时返回统一结果；Plugin 不因此执行任何外部 Git/发布动作；
+- 最终 canonical `npm run harness:full` 已通过 typecheck、Oxlint、62 个生产自动化用例、build 与 pack dry-run；发布包 38 个文件并包含 QA、Reconciliation、Report 编译产物。
 
 ---
 
@@ -381,4 +390,4 @@
 
 ---
 
-*最后更新：2026-08-20（Task S3 完成，Task S4 启动）*
+*最后更新：2026-08-20（Task S4 完成，MVP 编排基线收口）*

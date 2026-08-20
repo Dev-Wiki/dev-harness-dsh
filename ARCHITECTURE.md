@@ -17,6 +17,7 @@ Human Command 先做 Skill preflight，再依 phase 启动/恢复 Audit、授权
 - QA Adapter：verified capability evidence + stable attempt/resume identity + manual checklist fallback + read-only boundary
 - QaFinding：独立 `QAF-*` source + authorization-preserving Auto Fix + fresh verification cycle + bounded retry
 - Final Reconciliation Adapter：original Finding identity set + fresh Audit snapshot + Audit-root mutation lease + authoritative outcomes
+- Run Summary：authoritative refs only + deterministic concern aggregation + schema-validated REPORT/DONE checkpoints
 - Finding Router：typed handoff 驱动路由，只有 confirmed defect 进入 Auto Fix
 - Bundle manifest：package.json 的 dsh.bundle.patch 指向 cordis.patch.yml
 - Plugin surface：name、inject、Config、apply(ctx, config)
@@ -34,6 +35,7 @@ Human Command 先做 Skill preflight，再依 phase 启动/恢复 Audit、授权
 - FullVerificationAdapter + fullVerificationLease + advanceFullVerification
 - QaAdapter + qaLease + QaFinding + advanceQaRun
 - FinalReconciliationAdapter + finalReconciliationLease + advanceFinalReconciliation
+- RunSummary + createRunSummary + advanceRunSummary
 - autoFixLease + autoFixCheckpoint + advanceRemediationRun
 - auditLease + auditCheckpoint + advanceAuditRun
 - ctx.devHarness + harness-run/resume/status

@@ -4,10 +4,10 @@
 
 ## 1. 进度快照
 
-- **核心阶段**：S4 Run Summary（🚧 开发中）
-- **当前瓶颈**：S3 已固定 fresh Audit Snapshot 与原始 Finding 终态接纳边界；S4 尚未建立可追溯汇总与 Overall 状态归并
+- **核心阶段**：MVP 编排基线（✅ 已完成）
+- **当前瓶颈**：无 MVP 实现阻塞；外部/native 自动 QA 仍需集成方提供独立运行证据后显式注册
 - **首版目标**：完成 Audit → Finding Router → Auto Fix → Full Verification → QA → Final Reconciliation → Report 的可恢复编排闭环
-- **需求状态**：MVP 需求已整理；DSH 目标版本固定为 rc.8，V0、K1、K2、K3、K4、S1、S2、S3 已完成，生产编排进入 S4
+- **需求状态**：MVP 需求与生产实现已完成；DSH 目标版本固定为 rc.8，V0、K1、K2、K3、K4、S1、S2、S3、S4 均有验证证据
 
 ## 2. 当前产品目标
 
@@ -27,7 +27,7 @@
 | **S1 — Full Verification** | 🟡 P1 | ✅ 已完成 | [Task S1](TaskDetails.md#task-s1) |
 | **S2 — QA Adapter 与失败闭环** | 🟡 P1 | ✅ 已完成 | [Task S2](TaskDetails.md#task-s2) |
 | **S3 — Final Reconciliation** | 🟡 P1 | ✅ 已完成 | [Task S3](TaskDetails.md#task-s3) |
-| **S4 — Run Summary** | 🟡 P1 | 🚧 开发中 | [Task S4](TaskDetails.md#task-s4) |
+| **S4 — Run Summary** | 🟡 P1 | ✅ 已完成 | [Task S4](TaskDetails.md#task-s4) |
 
 ## 4. 需求覆盖矩阵
 
@@ -43,9 +43,10 @@
 | M8 | 统一 Run Summary | ✅ | S4 |
 | 非目标 | Web UI、push、PR、release、deploy | ❌ | 明确排除，不创建实施任务 |
 
-## 5. 当前缺口与起手任务
+## 5. 当前缺口与后续边界
 
-1. **S4 — Run Summary**（🟡 P1，🚧 开发中）：汇总权威下游引用、剩余风险与人工动作，并归并 Overall 状态。
+1. **自动 QA 集成证据**：当前没有已验证的 external Skill 或 native browser/UI QA 协议；未注册 verified Adapter 时按设计生成 manual checklist 并停在 `NEEDS_USER`。
+2. **MVP 外动作**：push、PR、tag、release、deploy 仍不在本次授权和产品范围内。
 
 > 起手顺序：V0 → K1 → K2 → K3 → K4 → S1 → S2 → S3 → S4。
 
@@ -60,4 +61,4 @@
 
 ---
 
-*最后更新：2026-08-20（Task S3 完成，Task S4 启动）*
+*最后更新：2026-08-20（Task S4 完成，MVP 编排基线收口）*

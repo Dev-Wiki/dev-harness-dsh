@@ -159,7 +159,7 @@ DSH_HOME=<isolated-dir> node_modules/.bin/dsh --profile headless --dump-config
 
 ## 5. V0 决策与下游停止线
 
-V0 的生产实现前置证据与 K1–K4、S1、S2 编排基线均已完成。外部 QA Skill 不作为 V0 的硬依赖：当前环境没有已验证的稳定 QA Skill 输入、授权与完成状态协议，因此生产 QA 只选择带显式验证证据的已注册 Adapter；没有这种 Adapter 时生成手工检查清单并停在 `NEEDS_USER`，不得把 `MANUAL_REQUIRED` 冒充 `PASS`。
+V0 的生产实现前置证据与 K1–K4、S1–S4 MVP 编排基线均已完成。外部 QA Skill 不作为 V0 的硬依赖：当前环境没有已验证的稳定 QA Skill 输入、授权与完成状态协议，因此生产 QA 只选择带显式验证证据的已注册 Adapter；没有这种 Adapter 时生成手工检查清单并停在 `NEEDS_USER`，不得把 `MANUAL_REQUIRED` 冒充 `PASS`。
 
 生产 `harness:build` / `test` / `quick` / `bugfix` / `full` 已由 K1 建立并通过本机运行验证；fixture `verify` 仍不得冒充生产 `harness:full`。S1 已只消费该 canonical full 入口，并将 Run/snapshot/Git boundary、恢复 checkpoint 与 PASS/FAIL/入口缺失/环境不可用/执行器失败分流持久化。任何只有类型声明而无运行证据的能力必须继续标为源码已确认，不得写成“本项目可用”。
 

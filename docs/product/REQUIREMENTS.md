@@ -1,6 +1,6 @@
 # dev-harness-dsh MVP 需求
 
-> 状态：MVP 生产实现进行中；Task V0、K1、K2 已完成，Task K3 开发中。
+> 状态：MVP 生产实现已完成；Task V0、K1、K2、K3、K4、S1、S2、S3、S4 均有仓库内验证证据。
 >
 > 文档职责：本文是 MVP 产品需求、职责边界和验收口径的权威文档；活动状态与执行步骤分别由 [`Dashboard.md`](../plan/Dashboard.md) 和 [`TaskDetails.md`](../plan/TaskDetails.md) 维护。
 >
@@ -352,6 +352,7 @@ Plugin 不直接修改 `<docs-root>/audit/Findings.md`；resolved、remaining、
 - S1 已把已确认的 `npm run harness:full` 纳入版本化 Adapter 与可恢复编排；结果绑定实际 Run/snapshot/Git boundary，PASS、FAIL、入口缺失、环境不可用和执行器失败分别传播；
 - S2 已建立版本化 QA Adapter、验证证据门禁、稳定 attempt/resume identity、只读 boundary、独立 `QAF-*`、fresh Full Verification cycle 和三次有界重试；没有 verified Adapter 时使用 manual checklist fallback，结果不得标为 PASS；
 - S3 已建立 Final Reconciliation Adapter、原始 Finding ID 精确覆盖、fresh Audit snapshot、Audit-root mutation lease 与逐 Finding 权威终态引用；Plugin 不直接修改 Audit Registry；
+- S4 已建立 versioned Run Summary、权威引用完整性复核、`DONE` / `DONE_WITH_CONCERNS` 归并和 REPORT → DONE 原子终态；最终 `harness:full` 已通过；
 - 当前没有已验证的外部 QA Skill 或 native browser/UI QA 协议；集成方提供运行证据并显式注册前，产品不把底层 Agent/Tool/Skill seam 误写成 QA 可用能力；
 - fixture 的 TypeScript typecheck/build、Oxlint、测试、pack dry-run 和 rc.8 profile 组合已运行通过。
 

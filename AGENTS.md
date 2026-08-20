@@ -27,7 +27,7 @@
 ## 1. 项目上下文速查
 
 - **语言/框架**: TypeScript ES modules，Cordis 4.0.1 Plugin，DeepSeek Harness 0.1.0-rc.8，Schemastery 3.18.1，Node.js 22.19+
-- **架构模式**: 生产 Cordis Service、Human Command、不可变 Run Authorization、原子 Run State、版本化 Audit/Auto Fix/Full Verification/QA Adapter 与可恢复 Orchestrator 分层实现；V0 fixture 保留为 rc.8 兼容性证明
+- **架构模式**: 生产 Cordis Service、Human Command、不可变 Run Authorization、原子 Run State、版本化 Audit/Auto Fix/Full Verification/QA/Reconciliation 合同、Run Summary 与可恢复 Orchestrator 分层实现；V0 fixture 保留为 rc.8 兼容性证明
 - **核心入口**: src/index.ts 的 named Cordis plugin exports 与 DevHarnessRuntime service
 - **核心调用链**: Human Command 先做 Skill preflight，再依 phase 启动/恢复 Audit、授权 Auto Fix、canonical Full Verification 或 QA；Plugin 独立核对 Git 输出/提交/只读验证 boundary 并持久化权威下游引用
 - **版本识别依据**: 目标版本 dsh-v0.1.0-rc.8 / commit 141eb6fef83422698aef7a981029e843e8161534；生产依赖图由根 pnpm-lock.yaml 固定
@@ -92,7 +92,7 @@ Human Command 生命周期由 Session 的 command/run 与 command/done 记录；
 
 ## 12. 需人工确认
 
-- S4 尚需固定统一 Run Summary、权威引用完整性与 Overall 状态归并合同
+- 当前没有已验证的 external Skill 或 native browser/UI QA 协议；只有带运行证据并显式注册的 Adapter 可自动执行，否则使用 manual `NEEDS_USER`
 - 外部 QA Skill 协议仍未验证；没有验证证据的 Adapter 不可注册，默认只生成 manual checklist 且不声明 PASS
 
 ## 13. 代码风格示例（仓库抽样）
