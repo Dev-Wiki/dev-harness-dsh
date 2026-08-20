@@ -6,6 +6,8 @@ import z from '@deepseek-ai/schemastery'
 import { registerCommands, resumeCommand, runCommand, statusCommand } from './commands.js'
 
 export * from './commands.js'
+export * from './audit.js'
+export * from './router.js'
 export * from './skills.js'
 export * from './state.js'
 
