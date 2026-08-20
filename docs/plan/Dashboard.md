@@ -4,10 +4,10 @@
 
 ## 1. 进度快照
 
-- **核心阶段**：V0 集成面调研（🚧 开发中）
-- **当前瓶颈**：Agent / Workflow keyless 生命周期、clean restart 与 SIGKILL repair 已实跑；cwd-sensitive Skill、Git worktree 私有状态、Tool pipeline 和 QA 协议仍缺运行证据
+- **核心阶段**：K1 Plugin Skeleton 与状态基线（🚧 开发中）
+- **当前瓶颈**：生产工程、Run State、命令入口与 Skill preflight 尚未建立；V0 的 rc.8 集成与恢复边界已形成运行基线
 - **首版目标**：完成 Audit → Finding Router → Auto Fix → Full Verification → QA → Final Reconciliation → Report 的可恢复编排闭环
-- **需求状态**：MVP 需求已整理；DSH 目标版本固定为 rc.8，fixture 工具链已验证，生产实现尚未开始
+- **需求状态**：MVP 需求已整理；DSH 目标版本固定为 rc.8，V0 已完成，生产实现从 K1 开始
 
 ## 2. 当前产品目标
 
@@ -19,8 +19,8 @@
 
 | 需求项 | 优先级 | 状态 | 专题层 / 详情 |
 |---|---|---|---|
-| **V0 — DSH 集成面调研** | 🔴 P0 | 🚧 开发中 | [Task V0](TaskDetails.md#task-v0) |
-| **K1 — Plugin Skeleton 与状态基线** | 🔴 P0 | 📋 规划中 | [Task K1](TaskDetails.md#task-k1) |
+| **V0 — DSH 集成面调研** | 🔴 P0 | ✅ 已完成 | [Task V0](TaskDetails.md#task-v0) |
+| **K1 — Plugin Skeleton 与状态基线** | 🔴 P0 | 🚧 开发中 | [Task K1](TaskDetails.md#task-k1) |
 | **K2 — Audit Orchestration 与 Router** | 🔴 P0 | 📋 规划中 | [Task K2](TaskDetails.md#task-k2) |
 | **K3 — Auto Fix 队列与恢复** | 🔴 P0 | 📋 规划中 | [Task K3](TaskDetails.md#task-k3) |
 | **K4 — 提交授权模型** | 🔴 P0 | 📋 规划中 | [Task K4](TaskDetails.md#task-k4) |
@@ -45,9 +45,8 @@
 
 ## 5. 当前缺口与起手任务
 
-1. **V0 — DSH 集成面调研**（🔴 前置，🚧 开发中）：目标固定为官方 `dsh-v0.1.0-rc.8`；Plugin、Command、Agent（含 SIGKILL repair）、Worker Workflow、构建、打包和 profile 组合已有运行证据，其余公开面按源码证据与待实跑项分级记录在 [DSH_API_BASELINE](../integration/DSH_API_BASELINE.md)；下一步是 Skill/worktree、Tool pipeline 与 QA 协议验证。
-2. **K1 — Plugin Skeleton 与状态基线**（🔴 P0）：只在 V0 形成可复现基线后启动。
-3. **K2 — Audit Orchestration 与 Router**（🔴 P0）：以实际 dev-harness Audit 产物进行最小集成验证。
+1. **K1 — Plugin Skeleton 与状态基线**（🔴 P0，🚧 开发中）：按 V0 已验证的 Cordis Plugin/Human Command、cwd-sensitive Skill、Git private dir 与 atomic-write 边界建立生产工程、状态 schema 和 resume。
+2. **K2 — Audit Orchestration 与 Router**（🔴 P0）：等待 K1 提供稳定状态与命令 seam 后，以实际 dev-harness Audit 产物进行最小集成验证。
 
 > 起手顺序：V0 → K1 → K2 → K3 → K4 → S1 → S2 → S3 → S4。
 
@@ -62,4 +61,4 @@
 
 ---
 
-*最后更新：2026-08-20（根据 MVP 需求初始化活动计划）*
+*最后更新：2026-08-20（Task V0 完成，Task K1 启动）*

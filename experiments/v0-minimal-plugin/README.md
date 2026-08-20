@@ -1,6 +1,6 @@
 # V0 最小插件 fixture
 
-本 fixture 锁定 DeepSeek Harness `0.1.0-rc.8`，验证仓库外 bundle、Cordis plugin、Human Command、keyless Agent、Worker Workflow 和资源卸载行为。它只用于 Task V0，不是 K1 的生产实现。完整结论见 [DSH API 基线](../../docs/integration/DSH_API_BASELINE.md)。
+本 fixture 锁定 DeepSeek Harness `0.1.0-rc.8`，验证仓库外 bundle、Cordis plugin、Human Command、keyless Agent、Worker Workflow、Tool pipeline、linked worktree Skill 与私有原子状态边界。它只用于 Task V0，不是 K1 的生产实现。完整结论见 [DSH API 基线](../../docs/integration/DSH_API_BASELINE.md)。
 
 ## 验证范围
 
@@ -10,6 +10,8 @@
 - `smoke.mjs`：加载 rc.8 公开 exports，验证注册、执行、`command/run` / `command/done` 和 fiber dispose；
 - `agent-smoke.mjs`：用内存 LLM adapter 验证 create、cancel、whenIdle、handle dispose 与 JSONL clean restart resume，全程不需要 API key 或网络；
 - `workflow-smoke.mjs`：用真实 Worker 与内存 SubagentProvider 验证完成、取消、事件配对、holder dispose 和 thread exit；
+- `tool-pipeline-smoke.mjs`：通过真实 AgentLoop 验证成功、结构化错误、执行中取消、分发前取消的 live/durable 事件边界与 JSONL replay；
+- `worktree-smoke.mjs` / `atomic-writer-child.mjs`：通过真实 linked worktree 验证 cwd-sensitive Skill、private Git state、8 进程原子更新和 resume 漂移拒绝；
 - `crash-smoke.mjs` / `crash-agent-child.mjs`：在清空环境变量的独立子进程中于 request checkpoint 后触发 SIGKILL，验证 interrupted turn repair 与下一 turn 恢复；Windows 明确跳过；
 - `pnpm-lock.yaml`：锁定可复现依赖图。
 

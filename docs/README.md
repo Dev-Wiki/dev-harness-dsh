@@ -13,7 +13,7 @@
 
 ## 集成基线
 
-- [DSH rc.8 API 基线](integration/DSH_API_BASELINE.md)：V0 的版本锁定、证据等级、已执行验证与剩余停止线。
+- [DSH rc.8 API 基线](integration/DSH_API_BASELINE.md)：V0 的版本锁定、证据等级、已执行验证与下游停止线。
 
 ## 文档维护边界
 

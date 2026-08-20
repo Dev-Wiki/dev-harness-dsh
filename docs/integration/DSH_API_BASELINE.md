@@ -1,6 +1,6 @@
 # DSH 集成面基线（Task V0）
 
-> 状态：🚧 调研中。本文区分“源码已确认”和“运行已验证”；只有运行证据覆盖的行为才可直接进入实现。
+> 状态：✅ Task V0 已完成。本文区分“源码已确认”和“运行已验证”；只有运行证据覆盖的行为才可直接进入实现。
 >
 > 证据日期：2026-08-20。DeepSeek Harness 仍处于 developer preview，升级版本后必须重跑本页验证。
 
@@ -38,12 +38,13 @@
 
 ### 3.2 Skill Registry（`ctx.skills`）
 
-**结论：📚 源码已确认；cwd 行为尚未在本 fixture 实跑。**
+**结论：✅ cwd-sensitive lookup 与 linked worktree 隔离已运行验证。**
 
 - 公开读取面：`list(options)`、`snapshot(options)`、`get(name, options)`；注册面：`register(skill)`、`registerProvider(factory)`。
 - `SkillViewOptions` 包含 `scope`、`cwd`、`signal`，因此接口明确支持 agent scope、工作区选择和取消。
 - `SkillDefinition` 返回 `content`、可选 `path` / `metadata`，并保留 `invocation`、`source`、`provider`、`resourceBase`。
 - 文件系统 provider 的优先级为 project `.dsh/skills` → project `.agents/skills` → custom → user DSH → user agents → bundled；最近 `.git` 祖先决定 project root。
+- fixture 在主 worktree 与 linked worktree 中放置同名、不同正文的 project Skill，并从各自嵌套 cwd 调用 `snapshot()` / `get()`；两次读取均返回对应 worktree 的 `project-dsh` 路径与正文，没有跨 worktree 缓存污染。
 
 官方证据：[Skills 子系统](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.1.0-rc.8/docs/subsystems/skills.md)、[`dsh-skill` 实现](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.1.0-rc.8/packages/skill/skill/src/index.ts)。
 
@@ -88,23 +89,28 @@
 
 ### 3.6 Tool 与 Session Events
 
-**结论：📚 事件契约已由源码确认；完整 tool pipeline 尚未实跑。**
+**结论：✅ 成功、结构化错误、执行中取消、分发前取消与 JSONL replay 已运行验证。**
 
 - Tool 注册/执行公开面为 `ctx.tools` 与 `defineTool()`。
 - live pipeline：`tools/pre-execute` → guards → `tools/execute` → `tools/post-execute` → `tools/result`；`tools/change` 通知注册集合变化。
 - durable Session 事件是 `tool/call`、`tool/result`，不可与 live 的 `tools/result` 混淆。
 - Session 是 append-only event log；模型历史、恢复和 replay 由该日志派生。
+- fixture 通过真实 AgentLoop 触发四类 Tool 终态。成功、错误与执行中取消均按 `tool/call → pre → execute → body → post/result → tool/result` 配对；在 `assistant/message` 观察点取消时不会进入 live pipeline，但仍持久化平衡的 `tool/call` / `tool/result`。
+- 结构化 `HarnessError.code`、`ABORTED` 和 `ABORTED_BEFORE_DISPATCH` 均保留到 durable result；销毁 Context 后从 JSONL resume，四组 call/result 身份保持一致。
 
 官方证据：[Tools 子系统](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.1.0-rc.8/docs/subsystems/tools.md)、[Session](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.1.0-rc.8/docs/subsystems/session.md)、[Persistence](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.1.0-rc.8/docs/subsystems/persistence.md)。
 
 ### 3.7 Workspace、授权与 Plugin 私有状态
 
-**结论：📚 辅助能力已确认；它们不能替代 Plugin 自己的状态契约。**
+**结论：✅ worktree 私有路径与 atomic-write 已运行验证；Workspace / Approval 仍是源码确认。**
 
 - `ctx.workspaceRegistry` 管理 canonical path 对应的 DSH workspace 与 session membership；它不是任意 Plugin 私有 KV，也不负责解析 Git worktree 私有目录。
 - `ctx.approval` 只回答一次具体 action 是否允许，策略是 `ask | never`，且 `request()` 要求 session 处于 open turn；它不能表达或持久化本产品的 `fix-only | commit-each` 运行级授权。
 - `@deepseek-ai/dsh-atomic-write` 提供 `writeFileAtomic()` 与 `withFileLock()`，可作为 K1 原子状态文件的底层原语。
-- K1 仍必须自行通过 Git 解析实际 private path、保存运行级授权、校验 HEAD/worktree/依赖漂移，并用测试证明 resume 边界。
+- fixture 通过 `git rev-parse --absolute-git-dir` 解析每个 worktree 的 private Git dir；linked worktree 状态落在主仓 `.git/worktrees/<name>/dev-harness/dsh/<run-id>/state.json`，不使用 worktree 根的 `.git` 文件或 common dir。
+- 8 个独立进程使用 `withFileLock()` 包围 read-modify-write，并以 `writeFileAtomic()` 提交；最终 revision 与 writer 集合无丢失，持续并发读取始终为完整 JSON，且没有残留 lock/temp sibling，POSIX 权限为 `0600`。
+- 恢复基线同时固定 canonical worktree、private Git dir、HEAD、clean/dirty fingerprint、lockfile SHA-256 与实际解析包版本；worktree、tracked edit、HEAD、lockfile或包版本漂移均 fail closed，失败前后状态字节不变。
+- K1 仍必须把这些已验证原语落实为生产 Run State，并保存运行级授权；`writeFileAtomic()` 不承诺 fsync crash durability，现存 orphan lock 也必须由操作员处理而非自动删除。
 
 官方证据：[Workspace](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.1.0-rc.8/docs/subsystems/workspace.md)、[Approval](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.1.0-rc.8/docs/subsystems/approval.md)、[Atomic write](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.1.0-rc.8/packages/util/atomic-write/README.md)。
 
@@ -127,6 +133,8 @@ NPM_CONFIG_CACHE="$(mktemp -d)" npm run verify
 - Plugin / Human Command smoke：5/5 PASS；
 - keyless Agent create / cancel / JSONL clean restart：3/3 PASS；
 - Worker Workflow complete / cancel / holder dispose：3/3 PASS；
+- Tool pipeline success / structured error / running cancel / pre-dispatch cancel / JSONL replay：1/1 PASS；
+- linked worktree Skill lookup / private Git state / concurrent atomic writers / drift rejection：3/3 PASS；
 - Agent SIGKILL checkpoint repair / resume：1/1 PASS（Windows 明确跳过）；
 - `npm pack --dry-run`：PASS，tarball 只包含 README、bundle patch、编译产物和 package manifest。
 
@@ -149,13 +157,8 @@ DSH_HOME=<isolated-dir> node_modules/.bin/dsh --profile headless --dump-config
     probe: true
 ```
 
-## 5. 剩余验证与停止线
+## 5. V0 决策与下游停止线
 
-V0 尚未完成，K1 不启动。剩余项：
+V0 的生产实现前置证据已完成，K1 可以启动。外部 QA Skill 不作为 V0 的硬依赖：当前环境没有已验证的稳定 QA Skill 输入、授权与完成状态协议，因此 S2 必须按产品选择顺序重新发现能力；在验证出更高优先级 Adapter 前，唯一可声明可用的兜底是生成手工检查清单，且不得把 `MANUAL_REQUIRED` 冒充 `PASS`。
 
-1. 建立临时 Git worktree，验证 cwd-sensitive Skill lookup、Git private path 解析、跨进程原子写和漂移 fail-closed。
-2. 实跑完整 Tool pipeline，核对 live `tools/*` 与 durable `tool/*` 的配对和取消边界。
-3. 确认外部 QA Skill 的发现、授权、输入与完成状态协议；无法确认则保留 manual fallback。
-4. `HARNESS.md` 已由 Context / Commands 工作流生成并确认 fixture 的 build/test/quick；生产 `bugfix` / `full` 仍明确为 `Missing`，等待 K1 建立真实工程后补齐。
-
-任何一项只有类型声明而无运行证据时，必须继续标为源码已确认，不得写成“DSH 已支持且本项目可用”。
+生产 `bugfix` / `full` 仍为 `Missing`，fixture 的 `verify` 不能冒充生产 `harness:full`。K1 建立生产工程后必须补齐生产级 build/test/quick；S1 只能消费届时已确认的 full 入口。任何只有类型声明而无运行证据的能力必须继续标为源码已确认，不得写成“本项目可用”。

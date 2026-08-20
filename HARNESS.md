@@ -4,7 +4,7 @@
 它定义可执行命令、运行条件和验证边界，不替代 `AGENTS.md` 中的行为、安全与修改约束。
 
 ## 项目类型
-规划阶段的 DeepSeek Harness TypeScript Plugin 项目；当前仓库只有 Task V0 集成实验，生产 src 尚未建立
+DeepSeek Harness TypeScript Plugin 项目；Task V0 集成实验已完成，Task K1 开发中，生产 src 尚未建立
 
 ## 编译与启动问题排查
 - **WorkingDirectory**: repository root
@@ -44,7 +44,7 @@
 - **Preconditions**: 同 build
 - **DeviceRequirement**: `none`
 - **Shell / Environment**: 项目兼容 shell；无 LLM/API 凭据要求
-- **Evidence**: `experiments/v0-minimal-plugin/package.json:25`、`smoke.mjs`、`agent-smoke.mjs`、`workflow-smoke.mjs`、`crash-smoke.mjs`；2026-08-20 Plugin/Command 5/5、Agent 3/3、Workflow 3/3、SIGKILL repair 1/1 PASS
+- **Evidence**: `experiments/v0-minimal-plugin/package.json:25`、`smoke.mjs`、`agent-smoke.mjs`、`workflow-smoke.mjs`、`tool-pipeline-smoke.mjs`、`worktree-smoke.mjs`、`crash-smoke.mjs`；2026-08-20 Plugin/Command 5/5、Agent 3/3、Workflow 3/3、Tool pipeline 1/1、worktree/state 3/3、SIGKILL repair 1/1 PASS
 - **Status**: `confirmed`
 
 ### V0 fixture quick
@@ -80,4 +80,4 @@
 - `bugfix` 验证命令仍缺失，需人工补齐可信入口
 - build / test / quick / full 命令映射不完整，需人工确认最终入口
 - 生产 src、bugfix 与 full 命令尚不存在；fixture verify 不能冒充生产 harness:full
-- Skill/worktree、完整 Tool pipeline 与 QA 协议仍缺运行证据
+- 外部 QA Skill 协议尚未验证；S2 在验证 Adapter 前只声明 manual checklist fallback

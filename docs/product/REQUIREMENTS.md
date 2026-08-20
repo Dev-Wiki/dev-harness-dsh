@@ -1,6 +1,6 @@
 # dev-harness-dsh MVP 需求
 
-> 状态：规划中，尚无已实现功能。
+> 状态：MVP 生产实现尚未开始；Task V0 集成基线已完成。
 >
 > 文档职责：本文是 MVP 产品需求、职责边界和验收口径的权威文档；活动状态与执行步骤分别由 [`Dashboard.md`](../plan/Dashboard.md) 和 [`TaskDetails.md`](../plan/TaskDetails.md) 维护。
 >
@@ -337,18 +337,18 @@ Plugin 不直接修改 `<docs-root>/audit/Findings.md`；resolved、remaining、
 
 - 当前目标版本固定为官方 `dsh-v0.1.0-rc.8`（commit `141eb6f...`）；预览期只支持精确版本，不声明跨 rc 兼容；
 - DSH Plugin 框架为 Cordis：named `name` / `Config` / `inject` / `apply` exports，`dsh.bundle.patch` + profile `dsh.profile.bundles` 装配；fixture 已实跑注册与 fiber 卸载；
-- Skill Registry 公开面为 `ctx.skills.list()/snapshot()/get()/register()/registerProvider()`，`SkillViewOptions` 包含 `{ scope, cwd, signal }`；实际 cwd 查找仍列在待实跑项；
+- Skill Registry 公开面为 `ctx.skills.list()/snapshot()/get()/register()/registerProvider()`，`SkillViewOptions` 包含 `{ scope, cwd, signal }`；fixture 已实跑主 worktree 与 linked worktree 的 cwd 隔离读取；
 - 完整 Skill Definition 返回 `content`（Markdown body）、`path`、`metadata`、`invocation` 等字段；
 - Human Command 公开面为 `ctx.commands.register(...)`，执行走 `ctx.commands.execute(agent, line, attachments, signal)`，生命周期事件 `command/run`、`command/done`；fixture 已实跑；
 - Agent 已用公开 LLM adapter seam 实跑 create、cancel、whenIdle、dispose 与 JSONL clean restart resume；Workflow 已用真实 Worker 实跑完成、取消、事件配对、holder dispose 和 thread exit；
-- Tool Event 源码词汇含 durable `tool/call`、`tool/result` 及 live `tools/pre-execute|execute|post-execute|result|change`；
+- Tool Event 使用 durable `tool/call`、`tool/result` 及 live `tools/pre-execute|execute|post-execute|result|change`；fixture 已实跑成功、结构化错误、执行中取消、分发前取消与 JSONL replay 配对；
 - 会话 clean restart 已验证 append-only 事件、`session/end-seed`、连续 seq 与 turn 续号；独立子进程 SIGKILL 后也已验证 checkpoint repair 合成 interrupted turn 并从下一 turn 恢复；
 - `ctx.workspaceRegistry` 不是 Plugin 私有状态存储；`ctx.approval` 的 `ask` / `never` 也不能替代 `fix-only` / `commit-each` 运行级授权；
+- Git private dir、跨进程原子写和 worktree/HEAD/依赖漂移拒绝已在真实 linked worktree fixture 实跑；K1 负责将该基线实现为生产 Run State；
+- 当前没有已验证的外部 QA Skill 协议；S2 在发现并验证更高优先级 Adapter 前必须使用 manual checklist fallback，结果不得标为 PASS；
 - fixture 的 TypeScript typecheck/build、Oxlint、测试、pack dry-run 和 rc.8 profile 组合已运行通过。
 
-### 仍待确认（Task V0 未完成项）
+### 后续任务仍须确认
 
-- 外部 QA Skill 的发现、授权、输入和完成状态协议；
-- cwd-sensitive Skill 查找、Git worktree 私有路径与跨进程状态写入的实际行为；
-- 完整 Tool pipeline 的 live / durable 事件配对与取消传播；
+- 外部 QA Skill 的发现、授权、输入和完成状态协议（S2；验证前使用 manual fallback）；
 - 生产项目级 build / test / quick / bugfix / full 命令；fixture 命令不能冒充生产 `harness:full`。
