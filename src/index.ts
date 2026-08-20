@@ -20,6 +20,7 @@ export * from './skills.js'
 export * from './state.js'
 export * from './verification.js'
 export * from './qa/index.js'
+export * from './reconciliation.js'
 
 export const name = 'dev-harness-dsh'
 export const inject = ['commands', 'skills']
