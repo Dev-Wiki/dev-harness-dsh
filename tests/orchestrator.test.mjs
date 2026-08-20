@@ -163,13 +163,9 @@ class FixtureAutoFixAdapter {
     await writeFile(join(request.cwd, 'fixed.txt'), 'fixed by Auto Fix\n')
     const boundary = await Plugin.captureWorktreeBoundary(request.cwd)
     return {
-      contractVersion: 1,
+      contractVersion: 2,
       runId: request.autoFixRunId,
-      findingId: request.findingId,
-      handoffRef: request.handoffRef,
-      auditRunId: request.auditRunId,
-      auditSnapshotRef: request.auditSnapshotRef,
-      findingRegistryRef: request.findingRegistryRef,
+      source: request.source,
       mode: 'fix',
       executionStatus: 'COMPLETED',
       completionStatus: 'DONE',

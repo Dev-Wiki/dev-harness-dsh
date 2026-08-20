@@ -1,6 +1,6 @@
 import { isAbsolute, posix } from 'node:path'
 
-export const AUTO_FIX_CONTRACT_VERSION = 1 as const
+export const AUTO_FIX_CONTRACT_VERSION = 2 as const
 
 export const AUTO_FIX_EXECUTION_STATUSES = [
   'RUNNING',
@@ -47,15 +47,32 @@ export const REGRESSION_SKIP_REASONS = [
 export type RegressionSkipReason = typeof REGRESSION_SKIP_REASONS[number]
 export type AutoFixMode = 'fix' | 'commit'
 
-export interface AutoFixStartRequest {
-  readonly cwd: string
-  readonly orchestrationRunId: string
-  readonly autoFixRunId: string
+export interface AuditFindingSource {
+  readonly kind: 'audit-finding'
   readonly findingId: string
   readonly handoffRef: string
   readonly auditRunId: string
   readonly auditSnapshotRef: string
   readonly findingRegistryRef: string
+}
+
+export interface QaFindingSource {
+  readonly kind: 'qa-finding'
+  readonly findingId: string
+  readonly handoffRef: string
+  readonly qaRunId: string
+  readonly qaAttempt: number
+  readonly qaSnapshotRef: string
+  readonly qaFindingRef: string
+}
+
+export type AutoFixSource = AuditFindingSource | QaFindingSource
+
+export interface AutoFixStartRequest {
+  readonly cwd: string
+  readonly orchestrationRunId: string
+  readonly autoFixRunId: string
+  readonly source: AutoFixSource
   readonly mode: AutoFixMode
   readonly expectedHead: string
   readonly expectedBranch: string
@@ -78,11 +95,7 @@ export interface AutoFixAdapter {
 export interface AutoFixObservation {
   readonly contractVersion: typeof AUTO_FIX_CONTRACT_VERSION
   readonly runId: string
-  readonly findingId: string
-  readonly handoffRef: string
-  readonly auditRunId: string
-  readonly auditSnapshotRef: string
-  readonly findingRegistryRef: string
+  readonly source: AutoFixSource
   readonly mode: AutoFixMode
   readonly executionStatus: AutoFixExecutionStatus
   readonly completionStatus?: AutoFixCompletionStatus
@@ -136,11 +149,7 @@ export function validateAutoFixObservation(
   value: unknown,
   expected: {
     readonly runId: string
-    readonly findingId: string
-    readonly handoffRef: string
-    readonly auditRunId: string
-    readonly auditSnapshotRef: string
-    readonly findingRegistryRef: string
+    readonly source: AutoFixSource
     readonly repositoryRoot: string
     readonly baseSha: string
     readonly branch: string
@@ -152,11 +161,7 @@ export function validateAutoFixObservation(
   if (record.contractVersion !== AUTO_FIX_CONTRACT_VERSION) fail('unsupported contractVersion')
   if (record.mode !== expected.mode) fail('Adapter mode does not match Run authorization')
   assertExactString(record, 'runId', expected.runId)
-  assertExactString(record, 'findingId', expected.findingId)
-  assertExactString(record, 'handoffRef', expected.handoffRef)
-  assertExactString(record, 'auditRunId', expected.auditRunId)
-  assertExactString(record, 'auditSnapshotRef', expected.auditSnapshotRef)
-  assertExactString(record, 'findingRegistryRef', expected.findingRegistryRef)
+  const source = validateAutoFixSource(record.source, expected.source)
   assertExactString(record, 'repositoryRoot', expected.repositoryRoot)
   assertExactString(record, 'baseSha', expected.baseSha)
   assertExactString(record, 'branch', expected.branch)
@@ -283,11 +288,7 @@ export function validateAutoFixObservation(
   return Object.freeze({
     contractVersion: AUTO_FIX_CONTRACT_VERSION,
     runId: expected.runId,
-    findingId: expected.findingId,
-    handoffRef: expected.handoffRef,
-    auditRunId: expected.auditRunId,
-    auditSnapshotRef: expected.auditSnapshotRef,
-    findingRegistryRef: expected.findingRegistryRef,
+    source,
     mode: expected.mode,
     executionStatus,
     ...(completionStatus === undefined ? {} : { completionStatus }),
@@ -323,6 +324,39 @@ export function validateAutoFixObservation(
   })
 }
 
+function validateAutoFixSource(value: unknown, expected: AutoFixSource): AutoFixSource {
+  const record = requireRecord(value, 'source')
+  if (record.kind !== expected.kind) fail('source kind does not match the Auto Fix request')
+  assertExactString(record, 'findingId', expected.findingId)
+  assertExactString(record, 'handoffRef', expected.handoffRef)
+  if (expected.kind === 'audit-finding') {
+    assertExactString(record, 'auditRunId', expected.auditRunId)
+    assertExactString(record, 'auditSnapshotRef', expected.auditSnapshotRef)
+    assertExactString(record, 'findingRegistryRef', expected.findingRegistryRef)
+    return Object.freeze({
+      kind: expected.kind,
+      findingId: expected.findingId,
+      handoffRef: expected.handoffRef,
+      auditRunId: expected.auditRunId,
+      auditSnapshotRef: expected.auditSnapshotRef,
+      findingRegistryRef: expected.findingRegistryRef,
+    })
+  }
+  assertExactString(record, 'qaRunId', expected.qaRunId)
+  assertExactInteger(record, 'qaAttempt', expected.qaAttempt)
+  assertExactString(record, 'qaSnapshotRef', expected.qaSnapshotRef)
+  assertExactString(record, 'qaFindingRef', expected.qaFindingRef)
+  return Object.freeze({
+    kind: expected.kind,
+    findingId: expected.findingId,
+    handoffRef: expected.handoffRef,
+    qaRunId: expected.qaRunId,
+    qaAttempt: expected.qaAttempt,
+    qaSnapshotRef: expected.qaSnapshotRef,
+    qaFindingRef: expected.qaFindingRef,
+  })
+}
+
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) fail(`${label} must be an object`)
   return value as Record<string, unknown>
@@ -353,6 +387,10 @@ function integer(record: Record<string, unknown>, key: string): number {
   const value = record[key]
   if (!Number.isInteger(value) || (value as number) < 0) fail(`${key} must be an integer >= 0`)
   return value as number
+}
+
+function assertExactInteger(record: Record<string, unknown>, key: string, expected: number): void {
+  if (integer(record, key) !== expected) fail(`${key} does not match the orchestration request`)
 }
 
 function array(value: unknown, label: string): unknown[] {

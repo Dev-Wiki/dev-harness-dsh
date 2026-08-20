@@ -88,23 +88,19 @@ async function observation(request, options = {}) {
   }
   const complete = executionStatus === 'COMPLETED'
   return {
-    contractVersion: 1,
+    contractVersion: 2,
     runId: request.autoFixRunId,
-    findingId: request.findingId,
-    handoffRef: request.handoffRef,
-    auditRunId: request.auditRunId,
-    auditSnapshotRef: request.auditSnapshotRef,
-    findingRegistryRef: request.findingRegistryRef,
+    source: request.source,
     mode: request.mode,
     executionStatus,
     ...(options.includeCompletion === false ? {} : { completionStatus }),
     revision: options.revision ?? 1,
     stateDigest: options.stateDigest ?? sha('a'),
-    executionRef: `autofix:execution:${request.findingId}`,
+    executionRef: `autofix:execution:${request.source.findingId}`,
     repositoryRoot: request.cwd,
     baseSha: request.expectedHead,
     branch: request.expectedBranch,
-    workspaceSnapshotRef: `autofix:snapshot:${request.findingId}`,
+    workspaceSnapshotRef: `autofix:snapshot:${request.source.findingId}`,
     workspaceBaseFingerprint: request.expectedWorkspaceBaseFingerprint,
     stage: complete ? 'report' : (options.stage ?? 'implement'),
     changedFiles: options.outputPaths ?? [],
@@ -112,18 +108,18 @@ async function observation(request, options = {}) {
     workspaceVerified: true,
     quiescent: true,
     ...(complete ? {
-      regressionRedRef: `autofix:red:${request.findingId}`,
-      regressionGreenRef: `autofix:green:${request.findingId}`,
+      regressionRedRef: `autofix:red:${request.source.findingId}`,
+      regressionGreenRef: `autofix:green:${request.source.findingId}`,
       reviewOutcome: 'PASS',
-      reviewEvidenceRef: `autofix:review:${request.findingId}`,
+      reviewEvidenceRef: `autofix:review:${request.source.findingId}`,
       reviewReviewer: 'independent',
       reviewDiffHash: sha('b'),
-      finalVerificationRef: `autofix:verify:${request.findingId}`,
+      finalVerificationRef: `autofix:verify:${request.source.findingId}`,
       finalVerificationObservedAt: '2026-08-20T12:00:00.000Z',
       finalVerificationDiffHash: sha('b'),
     } : {}),
     ...(completionStatus === 'DONE_WITH_CONCERNS'
-      ? { residualRiskRef: `autofix:risk:${request.findingId}` }
+      ? { residualRiskRef: `autofix:risk:${request.source.findingId}` }
       : {}),
     ...(options.blockerRef === undefined ? {} : { blockerRef: options.blockerRef }),
     ...(options.postCommitHead === undefined ? {} : {
@@ -141,11 +137,11 @@ test('serializes confirmed defects into independent fix-only runs and retains re
   const adapter = {
     name: 'fixture-auto-fix',
     async start(request) {
-      starts.push({ findingId: request.findingId, runId: request.autoFixRunId, mode: request.mode })
-      const path = request.findingId === 'AUD-001' ? 'fix-one.txt' : 'fix-two.txt'
-      await writeFile(join(request.cwd, path), `${request.findingId}\n`)
+      starts.push({ findingId: request.source.findingId, runId: request.autoFixRunId, mode: request.mode })
+      const path = request.source.findingId === 'AUD-001' ? 'fix-one.txt' : 'fix-two.txt'
+      await writeFile(join(request.cwd, path), `${request.source.findingId}\n`)
       return await observation(request, {
-        completionStatus: request.findingId === 'AUD-001' ? 'DONE' : 'DONE_WITH_CONCERNS',
+        completionStatus: request.source.findingId === 'AUD-001' ? 'DONE' : 'DONE_WITH_CONCERNS',
         outputPaths: [path],
       })
     },
@@ -285,7 +281,7 @@ for (const [executionStatus, completionStatus, expectedStatus, code] of [
           executionStatus,
           completionStatus,
           outputPaths: [],
-          blockerRef: `autofix:blocker:${request.findingId}`,
+          blockerRef: `autofix:blocker:${request.source.findingId}`,
         })
       },
       async resume() { throw new Error('not reached') },
@@ -338,7 +334,7 @@ test('fails closed when a later fix-only run overlaps an earlier run-owned file'
   const adapter = {
     name: 'overlap-auto-fix',
     async start(request) {
-      await writeFile(join(request.cwd, 'shared.txt'), `${request.findingId}\n`)
+      await writeFile(join(request.cwd, 'shared.txt'), `${request.source.findingId}\n`)
       return await observation(request, { outputPaths: ['shared.txt'] })
     },
     async resume() { throw new Error('not reached') },
@@ -366,11 +362,11 @@ test('commit-each delegates one exact commit per Finding and advances the accept
   const adapter = {
     name: 'committing-auto-fix',
     async start(request) {
-      starts.push({ findingId: request.findingId, mode: request.mode, parent: request.expectedHead })
-      const path = request.findingId === 'AUD-001' ? 'committed-one.txt' : 'committed-two.txt'
-      await writeFile(join(request.cwd, path), `${request.findingId}\n`)
+      starts.push({ findingId: request.source.findingId, mode: request.mode, parent: request.expectedHead })
+      const path = request.source.findingId === 'AUD-001' ? 'committed-one.txt' : 'committed-two.txt'
+      await writeFile(join(request.cwd, path), `${request.source.findingId}\n`)
       await git(request.cwd, 'add', '--', path)
-      await git(request.cwd, 'commit', '-m', `Fix ${request.findingId}`)
+      await git(request.cwd, 'commit', '-m', `Fix ${request.source.findingId}`)
       const commitSha = await git(request.cwd, 'rev-parse', 'HEAD')
       const boundary = await Plugin.captureWorktreeBoundary(request.cwd)
       return await observation(request, {
@@ -383,7 +379,7 @@ test('commit-each delegates one exact commit per Finding and advances the accept
           parentSha: request.expectedHead,
           changedFiles: [path],
           reviewDiffHash: sha('b'),
-          commitEvidenceRef: `git-workflow:commit:${request.findingId}`,
+          commitEvidenceRef: `git-workflow:commit:${request.source.findingId}`,
         }],
       })
     },

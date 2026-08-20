@@ -9,11 +9,14 @@ import {
 
 const expected = Object.freeze({
   runId: 'fix-run-1',
-  findingId: 'AUD-001',
-  handoffRef: 'handoff:defect-1',
-  auditRunId: 'audit-run-1',
-  auditSnapshotRef: 'audit-snapshot-1',
-  findingRegistryRef: 'docs/audit/Findings.md',
+  source: Object.freeze({
+    kind: 'audit-finding',
+    findingId: 'AUD-001',
+    handoffRef: 'handoff:defect-1',
+    auditRunId: 'audit-run-1',
+    auditSnapshotRef: 'audit-snapshot-1',
+    findingRegistryRef: 'docs/audit/Findings.md',
+  }),
   repositoryRoot: '/repo',
   baseSha: 'abc123',
   branch: 'main',
@@ -25,11 +28,7 @@ function observation(overrides = {}) {
   return {
     contractVersion: AUTO_FIX_CONTRACT_VERSION,
     runId: expected.runId,
-    findingId: expected.findingId,
-    handoffRef: expected.handoffRef,
-    auditRunId: expected.auditRunId,
-    auditSnapshotRef: expected.auditSnapshotRef,
-    findingRegistryRef: expected.findingRegistryRef,
+    source: expected.source,
     mode: 'fix',
     executionStatus: 'COMPLETED',
     completionStatus: 'DONE',
@@ -101,7 +100,7 @@ test('enforces status mapping, identity, and exact changed-file ownership', () =
     /mode does not match Run authorization/u,
   )
   assert.throws(
-    () => validateAutoFixObservation(observation({ findingId: 'AUD-999' }), expected),
+    () => validateAutoFixObservation(observation({ source: { ...expected.source, findingId: 'AUD-999' } }), expected),
     /findingId does not match/u,
   )
   assert.throws(
@@ -118,6 +117,29 @@ test('enforces status mapping, identity, and exact changed-file ownership', () =
       completionStatus: 'BLOCKED',
     }), expected),
     /blockerRef/u,
+  )
+})
+
+test('echoes QA-owned findings without inventing Audit authority', () => {
+  const qaSource = {
+    kind: 'qa-finding',
+    findingId: 'QAF-001',
+    handoffRef: 'qa:handoff:1',
+    qaRunId: 'qa-run-1',
+    qaAttempt: 1,
+    qaSnapshotRef: 'qa:snapshot:1',
+    qaFindingRef: 'qa:finding:1',
+  }
+  const validated = validateAutoFixObservation(observation({ source: qaSource }), {
+    ...expected,
+    source: qaSource,
+  })
+  assert.equal(validated.source.kind, 'qa-finding')
+  assert.equal(validated.source.findingId, 'QAF-001')
+  assert.equal('auditRunId' in validated.source, false)
+  assert.throws(
+    () => validateAutoFixObservation(observation({ source: expected.source }), { ...expected, source: qaSource }),
+    /source kind/u,
   )
 })
 
