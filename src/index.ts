@@ -3,6 +3,8 @@ import type {} from '@deepseek-ai/dsh-commands'
 import type {} from '@deepseek-ai/dsh-skill'
 import z from '@deepseek-ai/schemastery'
 
+export * from './state.js'
+
 export const name = 'dev-harness-dsh'
 export const inject = ['commands', 'skills']
 

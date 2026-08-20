@@ -5,6 +5,7 @@
     "moduleResolution": "Bundler",
     "outDir": "lib",
     "rootDir": "src",
+    "resolveJsonModule": true,
     "skipLibCheck": true,
     "strict": true,
     "target": "ES2024",
