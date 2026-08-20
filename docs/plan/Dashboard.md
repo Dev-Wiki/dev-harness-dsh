@@ -4,10 +4,10 @@
 
 ## 1. 进度快照
 
-- **核心阶段**：S2 QA Adapter 与失败闭环（🚧 开发中）
-- **当前瓶颈**：S1 已把 canonical `harness:full`、snapshot 和失败分流纳入恢复状态；S2 尚未固定 QA 能力选择、结果协议与失败重试上限
+- **核心阶段**：S3 Final Audit Reconciliation（🚧 开发中）
+- **当前瓶颈**：S2 已固定 QA 合同、恢复、`QaFinding` 与有界失败闭环；S3 尚未建立 fresh Audit Snapshot 复核与终态接纳边界
 - **首版目标**：完成 Audit → Finding Router → Auto Fix → Full Verification → QA → Final Reconciliation → Report 的可恢复编排闭环
-- **需求状态**：MVP 需求已整理；DSH 目标版本固定为 rc.8，V0、K1、K2、K3、K4、S1 已完成，生产编排进入 S2
+- **需求状态**：MVP 需求已整理；DSH 目标版本固定为 rc.8，V0、K1、K2、K3、K4、S1、S2 已完成，生产编排进入 S3
 
 ## 2. 当前产品目标
 
@@ -25,8 +25,8 @@
 | **K3 — Auto Fix 队列与恢复** | 🔴 P0 | ✅ 已完成 | [Task K3](TaskDetails.md#task-k3) |
 | **K4 — 提交授权模型** | 🔴 P0 | ✅ 已完成 | [Task K4](TaskDetails.md#task-k4) |
 | **S1 — Full Verification** | 🟡 P1 | ✅ 已完成 | [Task S1](TaskDetails.md#task-s1) |
-| **S2 — QA Adapter 与失败闭环** | 🟡 P1 | 🚧 开发中 | [Task S2](TaskDetails.md#task-s2) |
-| **S3 — Final Reconciliation** | 🟡 P1 | 📋 规划中 | [Task S3](TaskDetails.md#task-s3) |
+| **S2 — QA Adapter 与失败闭环** | 🟡 P1 | ✅ 已完成 | [Task S2](TaskDetails.md#task-s2) |
+| **S3 — Final Reconciliation** | 🟡 P1 | 🚧 开发中 | [Task S3](TaskDetails.md#task-s3) |
 | **S4 — Run Summary** | 🟡 P1 | 📋 规划中 | [Task S4](TaskDetails.md#task-s4) |
 
 ## 4. 需求覆盖矩阵
@@ -45,8 +45,8 @@
 
 ## 5. 当前缺口与起手任务
 
-1. **S2 — QA Adapter 与失败闭环**（🟡 P1，🚧 开发中）：建立可验证的 QA 能力选择、结果协议、QaFinding 与有上限重试闭环。
-2. **S3 — Final Reconciliation**（🟡 P1）：等待 QA 结果稳定后，在 fresh Audit snapshot 上更新 Finding 终态。
+1. **S3 — Final Reconciliation**（🟡 P1，🚧 开发中）：在 fresh Audit snapshot 上复核原始 Finding，并只接纳权威 reconciliation 终态。
+2. **S4 — Run Summary**（🟡 P1）：等待最终复核结果稳定后生成统一、可追溯的运行摘要。
 
 > 起手顺序：V0 → K1 → K2 → K3 → K4 → S1 → S2 → S3 → S4。
 
@@ -61,4 +61,4 @@
 
 ---
 
-*最后更新：2026-08-20（Task S1 完成，Task S2 启动）*
+*最后更新：2026-08-20（Task S2 完成，Task S3 启动）*

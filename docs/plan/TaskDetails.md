@@ -2,7 +2,7 @@
 
 > 本文档是 [Dashboard.md](Dashboard.md) 的执行层补充。产品边界与验收口径以 [MVP 需求](../product/REQUIREMENTS.md) 为准。
 >
-> **当前主题**：dev-harness-dsh MVP。Task V0、K1、K2、K3、K4、S1 已完成，Task S2 开发中；其他任务未经实现和验证证据不得标记完成。
+> **当前主题**：dev-harness-dsh MVP。Task V0、K1、K2、K3、K4、S1、S2 已完成，Task S3 开发中；其他任务未经实现和验证证据不得标记完成。
 
 <a id="task-v0"></a>
 ## 0. 前置调研：DSH 集成面与工具链基线（Task V0）
@@ -249,8 +249,8 @@
 ### Task S2：QA Adapter 与失败闭环
 
 - **优先级**：🟡 P1
-- **状态**：🚧 开发中
-- **估时**：S1 完成后评估
+- **状态**：✅ 已完成
+- **估时**：已完成（2026-08-20）
 - **依赖**：Task S1；V0 确认的 Agent / 外部 Skill 调度能力
 
 **目标**：
@@ -261,13 +261,22 @@
 - 支持 QA Failure → Auto Fix → Full Verification → QA Retry；
 - 自动重试有明确上限，无法执行不冒充 PASS。
 
-**预计文件**：
+**实现文件**：
 
 - Create: `src/qa/adapter.ts` — Adapter 接口和结果模型；
-- Create: `src/qa/native.ts` — 已验证的 Agent 工具适配；
-- Create: `src/qa/external-skill.ts` — 已验证的外部 Skill 适配；
+- Create: `src/qa/native.ts` — 仅接受验证证据的 Agent 工具 Adapter 定义封装；
+- Create: `src/qa/external-skill.ts` — 仅接受验证证据的外部 Skill Adapter 定义封装；
 - Modify: `src/orchestrator.ts` — QA 阶段和失败闭环；
 - Test: QA 选择、失败重试、手工降级和授权传播测试。
+
+**完成证据（2026-08-20）**：
+
+- `src/qa` 固定版本化 QA Adapter / Observation 合同；用户显式选择优先，其后按 verified external Skill、native Agent、CLI/API 排序，注册与恢复均要求稳定的 Adapter 类型和验证证据引用；当前未内置任何未经验证的自动 Adapter；
+- 无 verified Adapter 时生成持久化 manual checklist，Run 停在 `NEEDS_USER / QA_MANUAL_REQUIRED`，`MANUAL_REQUIRED` 不能冒充 PASS；PASS、FAIL、BLOCKED、FAILED、CANCELLED 与 RUNNING checkpoint 分别传播；
+- Run State schema v3 固化显式 `qa=<adapter>` 偏好、三次重试上限、attempt/run/verification identity、OPEN lease、只读 workspace boundary、Full Verification history/cycle 与独立 `QAF-*` Registry；同 attempt 中断恢复不换 Adapter 或验证证据；
+- QA FAIL 原子创建包含 Symptom、Expected、Steps、Environment、Evidence 引用的 `QaFinding`，Auto Fix v2 以 `qa-finding` discriminated source 接收，不伪造 `AUD-*` 或 Audit authority，且继承原 Run 的 fix-only / commit-each 授权；
+- `QAF` 修复完成后必须使用新 verification Run/snapshot 执行 canonical Full Verification PASS，才进入下一 QA attempt；第三次失败进入 `QA_RETRY_EXHAUSTED`，不会继续自动循环；QA 前后任何 tracked/staged/untracked 修改均拒绝；
+- 自动化覆盖合同/选择/证据漂移、manual fallback、RUNNING resume、只读拒绝、QAF → Auto Fix → fresh Full Verification → QA Retry、授权来源和重试耗尽；53 个生产自动化用例 PASS。
 
 ---
 
@@ -275,7 +284,7 @@
 ### Task S3：Final Audit Reconciliation
 
 - **优先级**：🟡 P1
-- **状态**：📋 规划中
+- **状态**：🚧 开发中
 - **估时**：S2 完成后评估
 - **依赖**：Task S2
 
@@ -363,4 +372,4 @@
 
 ---
 
-*最后更新：2026-08-20（Task K2 完成，Task K3 启动）*
+*最后更新：2026-08-20（Task S2 完成，Task S3 启动）*

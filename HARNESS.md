@@ -4,7 +4,7 @@
 它定义可执行命令、运行条件和验证边界，不替代 `AGENTS.md` 中的行为、安全与修改约束。
 
 ## 项目类型
-DeepSeek Harness TypeScript Plugin 项目；Task V0、K1、K2、K3、K4、S1 已完成，Task S2 QA Adapter 开发中
+DeepSeek Harness TypeScript Plugin 项目；Task V0、K1、K2、K3、K4、S1、S2 已完成，Task S3 Final Audit Reconciliation 开发中
 
 ## 编译与启动问题排查
 - **WorkingDirectory**: repository root
@@ -32,7 +32,7 @@ DeepSeek Harness TypeScript Plugin 项目；Task V0、K1、K2、K3、K4、S1 已
 - **Preconditions**: 已执行 `pnpm install --frozen-lockfile --ignore-scripts`
 - **DeviceRequirement**: `none`
 - **Shell / Environment**: 项目兼容 shell；无 LLM/API 凭据要求；pack dry-run 需要可写 npm cache
-- **Evidence**: `package.json:28-32`；2026-08-20 本机执行生产 full，typecheck、Oxlint、49 个自动化用例与 pack dry-run PASS
+- **Evidence**: `package.json:28-32`；2026-08-20 本机执行生产 full，typecheck、Oxlint、53 个自动化用例与 pack dry-run PASS
 - **Status**: `confirmed`
 
 ### V0 fixture build
@@ -88,5 +88,5 @@ DeepSeek Harness TypeScript Plugin 项目；Task V0、K1、K2、K3、K4、S1 已
 - full: npm run harness:full
 
 ## 需人工确认
-- S2 尚需固定 QA Adapter 选择、权威结果、QaFinding 和有上限失败重试合同
-- 外部 QA Skill 协议尚未验证；S2 在验证 Adapter 前只声明 manual checklist fallback
+- S3 尚需固定 fresh Audit Snapshot、原始 Finding 身份与 reconciliation 终态接纳合同
+- 外部 QA Skill 协议仍未验证；当前自动 QA Adapter 必须由集成方携带验证证据显式注册，否则只生成 manual checklist 并停在 `NEEDS_USER`

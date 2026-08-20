@@ -4,16 +4,18 @@
 生产包 peer 依赖 Cordis、dsh-commands 与 dsh-skill，运行时依赖 atomic-write 与 Schemastery；开发依赖精确锁定 rc.8 Session 与 Skill filesystem 测试栈
 
 ## 核心业务流程
-Human Command 先做 Skill preflight，再依 phase 启动/恢复 Audit、授权 Auto Fix 或 canonical Full Verification；Plugin 独立核对 Git 输出/提交/只读验证 boundary 并持久化权威下游引用
+Human Command 先做 Skill preflight，再依 phase 启动/恢复 Audit、授权 Auto Fix、canonical Full Verification 或 QA；Plugin 独立核对 Git 输出/提交/只读验证 boundary 并持久化权威下游引用
 
 ## 架构模式
-生产 Cordis Service、Human Command、不可变 Run Authorization、原子 Run State、版本化 Audit/Auto Fix/Full Verification Adapter 与可恢复 Orchestrator 分层实现；V0 fixture 保留为 rc.8 兼容性证明
+生产 Cordis Service、Human Command、不可变 Run Authorization、原子 Run State、版本化 Audit/Auto Fix/Full Verification/QA Adapter 与可恢复 Orchestrator 分层实现；V0 fixture 保留为 rc.8 兼容性证明
 
 ## 模块接口与通信方式
 - Audit Adapter：版本化 Observation + OPEN mutation lease + quiescent workspace checkpoint
 - Auto Fix Adapter：authorization-bound fix/commit CompletionStatus + changed-file/commit ownership + monotonic resumable checkpoint
 - Run Authorization：fix-only / commit-each immutable mode + independently denied external actions + verified commit boundary
 - Full Verification Adapter：canonical harness:full + stable snapshot + read-only workspace boundary + distinct failure outcomes
+- QA Adapter：verified capability evidence + stable attempt/resume identity + manual checklist fallback + read-only boundary
+- QaFinding：独立 `QAF-*` source + authorization-preserving Auto Fix + fresh verification cycle + bounded retry
 - Finding Router：typed handoff 驱动路由，只有 confirmed defect 进入 Auto Fix
 - Bundle manifest：package.json 的 dsh.bundle.patch 指向 cordis.patch.yml
 - Plugin surface：name、inject、Config、apply(ctx, config)
@@ -29,6 +31,7 @@ Human Command 先做 Skill preflight，再依 phase 启动/恢复 Audit、授权
 - AutoFixAdapter + AutoFixObservation
 - RunAuthorization + adoptCommitBoundary
 - FullVerificationAdapter + fullVerificationLease + advanceFullVerification
+- QaAdapter + qaLease + QaFinding + advanceQaRun
 - autoFixLease + autoFixCheckpoint + advanceRemediationRun
 - auditLease + auditCheckpoint + advanceAuditRun
 - ctx.devHarness + harness-run/resume/status
