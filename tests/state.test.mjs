@@ -9,7 +9,10 @@ import { promisify } from 'node:util'
 import {
   RUNTIME_DEPENDENCIES,
   RunStateError,
+  adoptWorktreeBoundary,
+  captureWorktreeBoundary,
   createRun,
+  diffWorktreeBoundaries,
   listRuns,
   loadRun,
   resolveStatePath,
@@ -34,8 +37,12 @@ async function repository(name = 'repo') {
   await git(cwd, 'config', 'user.name', 'State Test')
   await git(cwd, 'config', 'user.email', 'state@example.invalid')
   await writeFile(join(cwd, 'README.md'), 'baseline\n')
+  await writeFile(join(cwd, 'AGENTS.md'), '# Agents\n')
+  await writeFile(join(cwd, 'ARCHITECTURE.md'), '# Architecture\n')
+  await writeFile(join(cwd, 'HARNESS.md'), '# Harness\n')
+  await writeFile(join(cwd, 'source.txt'), 'source baseline\n')
   await writeFile(join(cwd, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n')
-  await git(cwd, 'add', 'README.md', 'pnpm-lock.yaml')
+  await git(cwd, 'add', '.')
   await git(cwd, 'commit', '-m', 'baseline')
   return { scratch, cwd }
 }
@@ -64,6 +71,7 @@ test('creates private state with exact runtime dependencies and owner-only permi
 
   assert.equal(statePath, join(gitDir, 'dev-harness', 'dsh', state.runId, 'state.json'))
   assert.deepEqual(state.dependencies.packages, RUNTIME_DEPENDENCIES)
+  assert.match(state.contextFingerprint, /^[a-f0-9]{64}$/u)
   assert.deepEqual(await loadRun(cwd, state.runId), state)
   assert.deepEqual((await listRuns(cwd)).map(run => run.runId), [state.runId])
   assert.equal(await git(cwd, 'status', '--porcelain=v1', '--untracked-files=all'), '')
@@ -146,12 +154,16 @@ test('fails closed on worktree, HEAD, lockfile, and runtime dependency drift', a
   await expectCode(validateResume(state, linked), 'WORKTREE_MISMATCH')
   assert.equal(await readFile(statePath, 'utf8'), originalState)
 
-  await appendFile(join(cwd, 'README.md'), 'dirty\n')
+  await appendFile(join(cwd, 'source.txt'), 'dirty\n')
   await expectCode(validateResume(state, cwd), 'WORKTREE_MISMATCH')
+  await writeFile(join(cwd, 'source.txt'), 'source baseline\n')
+
+  await appendFile(join(cwd, 'README.md'), 'context drift\n')
+  await expectCode(validateResume(state, cwd), 'CONTEXT_MISMATCH')
   await writeFile(join(cwd, 'README.md'), 'baseline\n')
 
-  await appendFile(join(cwd, 'README.md'), 'committed\n')
-  await git(cwd, 'add', 'README.md')
+  await appendFile(join(cwd, 'source.txt'), 'committed\n')
+  await git(cwd, 'add', 'source.txt')
   await git(cwd, 'commit', '-m', 'advance head')
   await expectCode(validateResume(state, cwd), 'HEAD_MISMATCH')
   assert.equal(await readFile(statePath, 'utf8'), originalState)
@@ -175,6 +187,39 @@ test('classifies dependency drift before general dirty-worktree drift', async ()
   assert.equal(await readFile(statePath, 'utf8'), originalState)
 })
 
+test('accepts one explicit docs mutation boundary without weakening later drift checks', async () => {
+  const { cwd } = await repository('adopt')
+  const state = await createRun({ cwd, runId: 'adopt-run' })
+  const before = await captureWorktreeBoundary(cwd)
+  await mkdir(join(cwd, 'docs', 'audit'), { recursive: true })
+  await writeFile(join(cwd, 'docs', 'audit', 'Report.md'), '# Audit report\n')
+  const after = await captureWorktreeBoundary(cwd)
+
+  assert.deepEqual(diffWorktreeBoundaries(before, after), ['docs/audit/Report.md'])
+  const adopted = await adoptWorktreeBoundary({
+    cwd,
+    runId: state.runId,
+    expectedRevision: state.revision,
+    before,
+    boundary: after,
+    acceptedPaths: ['docs/audit/Report.md'],
+  })
+  assert.equal(adopted.revision, 1)
+  assert.equal(adopted.repo.worktreeFingerprint, after.fingerprint)
+  await validateResume(adopted, cwd)
+
+  await appendFile(join(cwd, 'source.txt'), 'unexpected later drift\n')
+  await expectCode(validateResume(adopted, cwd), 'WORKTREE_MISMATCH')
+  await expectCode(adoptWorktreeBoundary({
+    cwd,
+    runId: adopted.runId,
+    expectedRevision: adopted.revision,
+    before,
+    boundary: after,
+    acceptedPaths: ['docs/audit/Report.md'],
+  }), 'WORKTREE_MISMATCH')
+})
+
 test('rejects duplicate active runs, invalid ids, corrupt state, and symlink state files', async () => {
   const { cwd } = await repository('reject')
   const state = await createRun({ cwd, runId: 'active-run' })
@@ -186,7 +231,7 @@ test('rejects duplicate active runs, invalid ids, corrupt state, and symlink sta
   await expectCode(loadRun(cwd, state.runId), 'STATE_CORRUPT')
 
   if (process.platform !== 'win32') {
-    const target = join(cwd, 'README.md')
+    const target = join(cwd, 'source.txt')
     await rm(statePath)
     await import('node:fs/promises').then(fs => fs.symlink(target, statePath))
     await expectCode(loadRun(cwd, state.runId), 'STATE_CORRUPT')

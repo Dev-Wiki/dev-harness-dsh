@@ -31,8 +31,11 @@ async function createRepository() {
   await git(cwd, 'config', 'user.name', 'Command Test')
   await git(cwd, 'config', 'user.email', 'command@example.test')
   await writeFile(join(cwd, 'README.md'), '# command fixture\n')
+  await writeFile(join(cwd, 'AGENTS.md'), '# Agents\n')
+  await writeFile(join(cwd, 'ARCHITECTURE.md'), '# Architecture\n')
+  await writeFile(join(cwd, 'HARNESS.md'), '# Harness\n')
   await writeFile(join(cwd, 'pnpm-lock.yaml'), 'lockfileVersion: 9.0\n')
-  await git(cwd, 'add', 'README.md', 'pnpm-lock.yaml')
+  await git(cwd, 'add', '.')
   await git(cwd, 'commit', '-m', 'fixture')
   return cwd
 }

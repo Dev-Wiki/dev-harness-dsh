@@ -22,6 +22,7 @@ const execFile = promisify(execFileCallback)
 const MAX_GIT_OUTPUT = 64 * 1024 * 1024
 const RUN_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/u
 const LOCKFILE_CANDIDATES = ['pnpm-lock.yaml', 'package-lock.json', 'yarn.lock'] as const
+const CONTEXT_FILES = ['README.md', 'AGENTS.md', 'ARCHITECTURE.md', 'HARNESS.md'] as const
 
 export const RUN_STATE_SCHEMA_VERSION = 1 as const
 
@@ -153,6 +154,7 @@ export interface RunState {
   revision: number
   runId: string
   repo: RepositoryIdentity
+  contextFingerprint: string
   dependencies: DependencySnapshot
   phase: Phase
   status: RunStatus
@@ -171,6 +173,8 @@ export interface RunState {
 
 export type RunStateErrorCode =
   | 'ACTIVE_RUN_EXISTS'
+  | 'CONTEXT_MISMATCH'
+  | 'CONTEXT_REQUIRED'
   | 'DEPENDENCY_MISMATCH'
   | 'HEAD_MISMATCH'
   | 'INVALID_RUN_ID'
@@ -210,6 +214,23 @@ export interface UpdateRunOptions {
   runId: string
   expectedRevision: number
   mutate(draft: RunState): void
+  now?: Date
+  runtimeDependencies?: Readonly<Record<string, string>>
+}
+
+export interface WorktreeBoundary {
+  readonly worktreeRoot: string
+  readonly fingerprint: string
+  readonly changedPaths: Readonly<Record<string, string>>
+}
+
+export interface AdoptWorktreeBoundaryOptions {
+  cwd: string
+  runId: string
+  expectedRevision: number
+  before: WorktreeBoundary
+  boundary: WorktreeBoundary
+  acceptedPaths: readonly string[]
   now?: Date
   runtimeDependencies?: Readonly<Record<string, string>>
 }
@@ -307,6 +328,80 @@ async function fingerprintWorktree(worktreeRoot: string): Promise<string> {
   return hash.digest('hex')
 }
 
+function nulPathSet(...buffers: readonly Buffer[]): string[] {
+  return [...new Set(buffers.flatMap(buffer => buffer.toString('utf8').split('\0').filter(Boolean)))].sort()
+}
+
+async function fingerprintChangedPath(worktreeRoot: string, rawPath: string): Promise<string> {
+  const absolutePath = resolve(worktreeRoot, rawPath)
+  if (!isWithin(worktreeRoot, absolutePath)) {
+    throw new RunStateError('WORKTREE_MISMATCH', `changed path escapes worktree: ${rawPath}`)
+  }
+  const hash = createHash('sha256')
+  updateHash(hash, 'path', Buffer.from(rawPath))
+  updateHash(hash, 'tracked', await gitBuffer(worktreeRoot, [
+    'diff', '--binary', '--no-ext-diff', '--no-textconv', 'HEAD', '--', rawPath,
+  ]))
+  updateHash(hash, 'staged', await gitBuffer(worktreeRoot, [
+    'diff', '--binary', '--cached', '--no-ext-diff', '--no-textconv', 'HEAD', '--', rawPath,
+  ]))
+  try {
+    const info = await lstat(absolutePath)
+    if (info.isSymbolicLink()) {
+      updateHash(hash, 'symlink', Buffer.from(await readlink(absolutePath)))
+    } else if (info.isFile()) {
+      updateHash(hash, 'file', await readFile(absolutePath))
+    } else {
+      updateHash(hash, 'other', Buffer.from(String(info.mode)))
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    updateHash(hash, 'missing', Buffer.alloc(0))
+  }
+  return hash.digest('hex')
+}
+
+async function captureChangedPaths(worktreeRoot: string): Promise<Readonly<Record<string, string>>> {
+  const paths = nulPathSet(
+    await gitBuffer(worktreeRoot, ['diff', '--name-only', '-z', 'HEAD', '--']),
+    await gitBuffer(worktreeRoot, ['diff', '--cached', '--name-only', '-z', 'HEAD', '--']),
+    await gitBuffer(worktreeRoot, ['ls-files', '--others', '--exclude-standard', '-z']),
+  )
+  return Object.freeze(Object.fromEntries(await Promise.all(paths.map(async path => [
+    path,
+    await fingerprintChangedPath(worktreeRoot, path),
+  ] as const))))
+}
+
+export async function captureWorktreeBoundary(cwd: string): Promise<WorktreeBoundary> {
+  const before = await captureRepositoryIdentity(cwd)
+  const changedPaths = await captureChangedPaths(before.worktreeRoot)
+  const after = await captureRepositoryIdentity(cwd)
+  if (
+    before.worktreeRoot !== after.worktreeRoot
+    || before.privateGitDir !== after.privateGitDir
+    || before.head !== after.head
+    || before.worktreeFingerprint !== after.worktreeFingerprint
+  ) {
+    throw new RunStateError('WORKTREE_MISMATCH', 'worktree changed while capturing a mutation boundary')
+  }
+  return Object.freeze({
+    worktreeRoot: after.worktreeRoot,
+    fingerprint: after.worktreeFingerprint,
+    changedPaths,
+  })
+}
+
+export function diffWorktreeBoundaries(before: WorktreeBoundary, after: WorktreeBoundary): readonly string[] {
+  if (before.worktreeRoot !== after.worktreeRoot) {
+    throw new RunStateError('WORKTREE_MISMATCH', 'worktree root changed across a mutation boundary')
+  }
+  const paths = new Set([...Object.keys(before.changedPaths), ...Object.keys(after.changedPaths)])
+  return Object.freeze([...paths]
+    .filter(path => before.changedPaths[path] !== after.changedPaths[path])
+    .sort())
+}
+
 export async function captureRepositoryIdentity(cwd: string): Promise<RepositoryIdentity> {
   const worktreeRoot = await realpath(await gitText(cwd, ['rev-parse', '--show-toplevel']))
   const privateGitDir = await realpath(resolve(await gitText(cwd, [
@@ -319,6 +414,29 @@ export async function captureRepositoryIdentity(cwd: string): Promise<Repository
     head: await gitText(cwd, ['rev-parse', '--verify', 'HEAD^{commit}']),
     worktreeFingerprint: await fingerprintWorktree(worktreeRoot),
   }
+}
+
+export async function captureContextFingerprint(worktreeRoot: string): Promise<string> {
+  const hash = createHash('sha256')
+  for (const relativePath of CONTEXT_FILES) {
+    const path = join(worktreeRoot, relativePath)
+    let info
+    try {
+      info = await lstat(path)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new RunStateError('CONTEXT_REQUIRED', `canonical Context file is missing: ${relativePath}`, {
+          cause: error,
+        })
+      }
+      throw error
+    }
+    if (!info.isFile() || info.isSymbolicLink()) {
+      throw new RunStateError('CONTEXT_REQUIRED', `canonical Context path must be a regular file: ${relativePath}`)
+    }
+    updateHash(hash, relativePath, await readFile(path))
+  }
+  return hash.digest('hex')
 }
 
 async function detectLockfile(worktreeRoot: string): Promise<string | undefined> {
@@ -360,10 +478,11 @@ async function captureDependencies(
 export async function captureEnvironment(
   cwd: string,
   options: CaptureEnvironmentOptions = {},
-): Promise<{ repo: RepositoryIdentity; dependencies: DependencySnapshot }> {
+): Promise<{ repo: RepositoryIdentity; contextFingerprint: string; dependencies: DependencySnapshot }> {
   const repo = await captureRepositoryIdentity(cwd)
   return {
     repo,
+    contextFingerprint: await captureContextFingerprint(repo.worktreeRoot),
     dependencies: await captureDependencies(repo.worktreeRoot, options),
   }
 }
@@ -491,6 +610,7 @@ function parseRunState(value: unknown): RunState {
       head: requireString(repo, 'head'),
       worktreeFingerprint: requireString(repo, 'worktreeFingerprint'),
     },
+    contextFingerprint: requireString(value, 'contextFingerprint'),
     dependencies: {
       ...optionalString(dependencies, 'lockfilePath') === undefined
         ? {}
@@ -600,6 +720,9 @@ export async function validateResume(
   if (current.repo.head !== state.repo.head) {
     throw new RunStateError('HEAD_MISMATCH', 'HEAD commit changed')
   }
+  if (current.contextFingerprint !== state.contextFingerprint) {
+    throw new RunStateError('CONTEXT_MISMATCH', 'canonical Context fingerprint changed')
+  }
   if (
     current.dependencies.lockfilePath !== state.dependencies.lockfilePath
     || current.dependencies.lockfileSha256 !== state.dependencies.lockfileSha256
@@ -666,7 +789,7 @@ export async function createRun(options: CreateRunOptions): Promise<RunState> {
 }
 
 function assertImmutable(previous: RunState, next: RunState): void {
-  const immutable = ['schemaVersion', 'runId', 'repo', 'dependencies', 'createdAt'] as const
+  const immutable = ['schemaVersion', 'runId', 'repo', 'contextFingerprint', 'dependencies', 'createdAt'] as const
   for (const key of immutable) {
     if (JSON.stringify(previous[key]) !== JSON.stringify(next[key])) {
       throw new RunStateError('INVALID_TRANSITION', `${key} is immutable`)
@@ -726,4 +849,79 @@ export async function updateRun(options: UpdateRunOptions): Promise<RunState> {
     await writeStateFile(statePath, next)
     return next
   })
+}
+
+export async function adoptWorktreeBoundary(options: AdoptWorktreeBoundaryOptions): Promise<RunState> {
+  const statePath = await resolveStatePath(options.cwd, options.runId)
+  return await withFileLock(statePath, async () => {
+    const previous = await readStateFile(statePath)
+    if (previous.revision !== options.expectedRevision) {
+      throw new RunStateError(
+        'REVISION_CONFLICT',
+        `expected revision ${options.expectedRevision}, found ${previous.revision}`,
+      )
+    }
+    if (
+      options.before.worktreeRoot !== previous.repo.worktreeRoot
+      || options.before.fingerprint !== previous.repo.worktreeFingerprint
+    ) {
+      throw new RunStateError('WORKTREE_MISMATCH', 'mutation lease did not open from the current Run baseline')
+    }
+    const actualPaths = diffWorktreeBoundaries(options.before, options.boundary)
+    const acceptedPaths = [...new Set(options.acceptedPaths)].sort()
+    if (JSON.stringify(actualPaths) !== JSON.stringify(acceptedPaths)) {
+      throw new RunStateError('WORKTREE_MISMATCH', 'mutation boundary changed paths do not match the accepted output set')
+    }
+    const current = await captureEnvironment(options.cwd, {
+      lockfilePath: previous.dependencies.lockfilePath,
+      runtimeDependencies: options.runtimeDependencies,
+    })
+    assertAdoptableEnvironment(previous, current)
+    if (
+      options.boundary.worktreeRoot !== current.repo.worktreeRoot
+      || options.boundary.fingerprint !== current.repo.worktreeFingerprint
+    ) {
+      throw new RunStateError('WORKTREE_MISMATCH', 'accepted mutation boundary is not the current worktree')
+    }
+    const next = structuredClone(previous)
+    next.repo.worktreeFingerprint = current.repo.worktreeFingerprint
+    next.revision = previous.revision + 1
+    next.updatedAt = (options.now ?? new Date()).toISOString()
+    const confirmed = await captureEnvironment(options.cwd, {
+      lockfilePath: previous.dependencies.lockfilePath,
+      runtimeDependencies: options.runtimeDependencies,
+    })
+    assertAdoptableEnvironment(previous, confirmed)
+    if (confirmed.repo.worktreeFingerprint !== next.repo.worktreeFingerprint) {
+      throw new RunStateError('WORKTREE_MISMATCH', 'worktree changed while accepting a mutation boundary')
+    }
+    parseRunState(next)
+    await writeStateFile(statePath, next)
+    return next
+  })
+}
+
+function assertAdoptableEnvironment(
+  previous: RunState,
+  current: Awaited<ReturnType<typeof captureEnvironment>>,
+): void {
+  if (
+    current.repo.worktreeRoot !== previous.repo.worktreeRoot
+    || current.repo.privateGitDir !== previous.repo.privateGitDir
+  ) {
+    throw new RunStateError('WORKTREE_MISMATCH', 'canonical worktree or private Git dir changed')
+  }
+  if (current.repo.head !== previous.repo.head) {
+    throw new RunStateError('HEAD_MISMATCH', 'HEAD commit changed')
+  }
+  if (current.contextFingerprint !== previous.contextFingerprint) {
+    throw new RunStateError('CONTEXT_MISMATCH', 'canonical Context fingerprint changed')
+  }
+  if (
+    current.dependencies.lockfilePath !== previous.dependencies.lockfilePath
+    || current.dependencies.lockfileSha256 !== previous.dependencies.lockfileSha256
+    || !sameRecord(current.dependencies.packages, previous.dependencies.packages)
+  ) {
+    throw new RunStateError('DEPENDENCY_MISMATCH', 'lockfile or resolved runtime package versions changed')
+  }
 }
