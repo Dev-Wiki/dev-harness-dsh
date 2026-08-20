@@ -15,7 +15,9 @@ import {
   type AutoFixAdapter,
   type AutoFixObservation,
 } from './autofix.js'
+import { autoFixExecutionMode } from './authorization.js'
 import {
+  adoptCommitBoundary,
   adoptWorktreeBoundary,
   captureWorktreeBoundary,
   diffWorktreeBoundaries,
@@ -289,7 +291,7 @@ export async function advanceRemediationRun(options: {
     auditRunId,
     auditSnapshotRef: auditResult.snapshotRef,
     findingRegistryRef: auditResult.registryRef,
-    mode: 'fix' as const,
+    mode: autoFixExecutionMode(state.authorization),
     expectedHead: state.repo.head,
     expectedBranch: state.repo.branch,
     expectedCurrentWorkspaceFingerprint: lease.beforeFingerprint,
@@ -316,12 +318,35 @@ export async function advanceRemediationRun(options: {
     baseSha: state.repo.head,
     branch: state.repo.branch,
     workspaceFingerprint: workspaceBaseFingerprint,
+    mode: request.mode,
   })
   assertMonotonicAutoFixObservation(currentRun, observation)
 
   const after = await captureWorktreeBoundary(options.cwd)
   const changedPaths = diffWorktreeBoundaries(before, after)
   const baseChangedPaths = checkpoint?.baseChangedPaths ?? lease.beforeChangedPaths
+  if (observation.mode === 'commit' && observation.executionStatus === 'COMPLETED') {
+    const commit = observation.commits[0]!
+    assertCommittedAutoFixWorkspace(after, baseChangedPaths, observation)
+    return await adoptCommitBoundary({
+      cwd: options.cwd,
+      runId: state.runId,
+      expectedRevision: state.revision,
+      before,
+      boundary: after,
+      commit: {
+        sha: commit.sha,
+        parentSha: commit.parentSha,
+        autoFixRunId: observation.runId,
+        changedFiles: [...commit.changedFiles],
+        reviewDiffHash: commit.reviewDiffHash,
+        evidenceRef: commit.commitEvidenceRef,
+      },
+      mutate(next) {
+        applyAutoFixObservation(next, finding.findingId, observation, baseChangedPaths, before, after)
+      },
+    })
+  }
   assertAutoFixWorkspace(
     before,
     after,
@@ -344,73 +369,98 @@ export async function advanceRemediationRun(options: {
     runId: state.runId,
     expectedRevision: state.revision,
     mutate(next) {
-      const status = observation.completionStatus ?? observation.executionStatus
-      const reference = {
-        findingId: finding.findingId,
-        autoFixRunId: observation.runId,
-        status,
-        observationRevision: observation.revision,
-        stateDigest: observation.stateDigest,
-        executionRef: observation.executionRef,
-        workspaceSnapshotRef: observation.workspaceSnapshotRef,
-        workspaceBaseFingerprint: observation.workspaceBaseFingerprint,
-        ...(observation.finalVerificationRef === undefined
-          ? {}
-          : { finalVerificationRef: observation.finalVerificationRef }),
-        ...(observation.reviewDiffHash === undefined
-          ? {}
-          : { reviewDiffHash: observation.reviewDiffHash }),
-        ...(observation.residualRiskRef === undefined
-          ? {}
-          : { residualRiskRef: observation.residualRiskRef }),
-      }
-      const runIndex = next.fixRuns.findIndex(run => run.findingId === finding.findingId)
-      if (runIndex === -1) next.fixRuns.push(reference)
-      else next.fixRuns[runIndex] = reference
-      next.autoFixCheckpoint = {
-        findingId: finding.findingId,
-        autoFixRunId: observation.runId,
-        observationRevision: observation.revision,
-        stateDigest: observation.stateDigest,
-        workspaceSnapshotRef: observation.workspaceSnapshotRef,
-        baseChangedPaths: { ...baseChangedPaths },
-        previousFingerprint: before.fingerprint,
-        acceptedFingerprint: after.fingerprint,
-        outputs: observation.changeOutputs.map(output => ({ ...output })),
-      }
-      delete next.autoFixLease
-      delete next.blocker
-      if (observation.executionStatus === 'RUNNING') {
-        next.status = 'PAUSED'
-        next.currentFinding = finding.findingId
-      } else if (observation.executionStatus === 'BLOCKED') {
-        next.status = 'BLOCKED'
-        next.currentFinding = finding.findingId
-        next.blocker = { code: 'AUTO_FIX_BLOCKED', message: observation.blockerRef! }
-      } else if (observation.executionStatus === 'NEEDS_CONTEXT') {
-        next.status = 'NEEDS_USER'
-        next.currentFinding = finding.findingId
-        next.blocker = { code: 'AUTO_FIX_NEEDS_CONTEXT', message: observation.blockerRef! }
-      } else if (observation.executionStatus === 'FAILED') {
-        next.status = 'FAILED'
-        next.currentFinding = finding.findingId
-        next.blocker = { code: 'AUTO_FIX_FAILED', message: observation.executionRef }
-      } else if (observation.executionStatus === 'CANCELLED') {
-        next.status = 'CANCELLED'
-        next.currentFinding = finding.findingId
-      } else {
-        next.status = 'RUNNING'
-        const remaining = next.findings.find(candidate =>
-          candidate.status === 'confirmed'
-          && candidate.route === 'auto-fix'
-          && !next.fixRuns.some(run =>
-            run.findingId === candidate.findingId
-            && ['DONE', 'DONE_WITH_CONCERNS'].includes(run.status)))
-        if (remaining === undefined) delete next.currentFinding
-        else next.currentFinding = remaining.findingId
-      }
+      applyAutoFixObservation(next, finding.findingId, observation, baseChangedPaths, before, after)
     },
   })
+}
+
+function applyAutoFixObservation(
+  next: RunState,
+  findingId: string,
+  observation: AutoFixObservation,
+  baseChangedPaths: Readonly<Record<string, string>>,
+  before: WorktreeBoundary,
+  after: WorktreeBoundary,
+): void {
+  const status = observation.completionStatus ?? observation.executionStatus
+  const reference = {
+    findingId,
+    autoFixRunId: observation.runId,
+    status,
+    observationRevision: observation.revision,
+    stateDigest: observation.stateDigest,
+    executionRef: observation.executionRef,
+    workspaceSnapshotRef: observation.workspaceSnapshotRef,
+    workspaceBaseFingerprint: observation.workspaceBaseFingerprint,
+    ...(observation.finalVerificationRef === undefined
+      ? {}
+      : { finalVerificationRef: observation.finalVerificationRef }),
+    ...(observation.reviewDiffHash === undefined
+      ? {}
+      : { reviewDiffHash: observation.reviewDiffHash }),
+    ...(observation.residualRiskRef === undefined
+      ? {}
+      : { residualRiskRef: observation.residualRiskRef }),
+  }
+  const runIndex = next.fixRuns.findIndex(run => run.findingId === findingId)
+  if (runIndex === -1) next.fixRuns.push(reference)
+  else next.fixRuns[runIndex] = reference
+  if (observation.commits.length === 1) {
+    const commit = observation.commits[0]!
+    if (next.commits.some(item => item.sha === commit.sha || item.autoFixRunId === observation.runId)) {
+      throw new AutoFixContractError('Auto Fix commit was already recorded')
+    }
+    next.commits.push({
+      sha: commit.sha,
+      parentSha: commit.parentSha,
+      autoFixRunId: observation.runId,
+      changedFiles: [...commit.changedFiles],
+      reviewDiffHash: commit.reviewDiffHash,
+      evidenceRef: commit.commitEvidenceRef,
+    })
+  }
+  next.autoFixCheckpoint = {
+    findingId,
+    autoFixRunId: observation.runId,
+    observationRevision: observation.revision,
+    stateDigest: observation.stateDigest,
+    workspaceSnapshotRef: observation.workspaceSnapshotRef,
+    baseChangedPaths: { ...baseChangedPaths },
+    previousFingerprint: before.fingerprint,
+    acceptedFingerprint: after.fingerprint,
+    outputs: observation.changeOutputs.map(output => ({ ...output })),
+  }
+  delete next.autoFixLease
+  delete next.blocker
+  if (observation.executionStatus === 'RUNNING') {
+    next.status = 'PAUSED'
+    next.currentFinding = findingId
+  } else if (observation.executionStatus === 'BLOCKED') {
+    next.status = 'BLOCKED'
+    next.currentFinding = findingId
+    next.blocker = { code: 'AUTO_FIX_BLOCKED', message: observation.blockerRef! }
+  } else if (observation.executionStatus === 'NEEDS_CONTEXT') {
+    next.status = 'NEEDS_USER'
+    next.currentFinding = findingId
+    next.blocker = { code: 'AUTO_FIX_NEEDS_CONTEXT', message: observation.blockerRef! }
+  } else if (observation.executionStatus === 'FAILED') {
+    next.status = 'FAILED'
+    next.currentFinding = findingId
+    next.blocker = { code: 'AUTO_FIX_FAILED', message: observation.executionRef }
+  } else if (observation.executionStatus === 'CANCELLED') {
+    next.status = 'CANCELLED'
+    next.currentFinding = findingId
+  } else {
+    next.status = 'RUNNING'
+    const remaining = next.findings.find(candidate =>
+      candidate.status === 'confirmed'
+      && candidate.route === 'auto-fix'
+      && !next.fixRuns.some(run =>
+        run.findingId === candidate.findingId
+        && ['DONE', 'DONE_WITH_CONCERNS'].includes(run.status)))
+    if (remaining === undefined) delete next.currentFinding
+    else next.currentFinding = remaining.findingId
+  }
 }
 
 function nextAutoFixFinding(state: RunState) {
@@ -490,6 +540,31 @@ function assertAutoFixWorkspace(
   }
   if (before.fingerprint === after.fingerprint && changedPaths.length > 0) {
     throw new AutoFixContractError('Auto Fix mutation boundary is internally inconsistent')
+  }
+}
+
+function assertCommittedAutoFixWorkspace(
+  after: WorktreeBoundary,
+  baseChangedPaths: Readonly<Record<string, string>>,
+  observation: AutoFixObservation,
+): void {
+  if (observation.postCommitWorkspaceFingerprint !== after.fingerprint) {
+    throw new AutoFixContractError('post-commit workspace fingerprint does not match Git')
+  }
+  const afterPaths = Object.keys(after.changedPaths).sort()
+  const basePaths = Object.keys(baseChangedPaths).sort()
+  if (JSON.stringify(afterPaths) !== JSON.stringify(basePaths)) {
+    throw new AutoFixContractError('commit mode left uncommitted Auto Fix changes or altered dirty-file scope')
+  }
+  for (const [path, fingerprint] of Object.entries(baseChangedPaths)) {
+    if (after.changedPaths[path] !== fingerprint) {
+      throw new AutoFixContractError(`commit mode altered a preexisting changed path: ${path}`)
+    }
+  }
+  for (const path of observation.changedFiles) {
+    if (baseChangedPaths[path] !== undefined) {
+      throw new AutoFixContractError(`commit mode included a preexisting changed path: ${path}`)
+    }
   }
 }
 

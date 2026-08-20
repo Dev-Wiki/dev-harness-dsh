@@ -45,6 +45,7 @@ export const REGRESSION_SKIP_REASONS = [
 ] as const
 
 export type RegressionSkipReason = typeof REGRESSION_SKIP_REASONS[number]
+export type AutoFixMode = 'fix' | 'commit'
 
 export interface AutoFixStartRequest {
   readonly cwd: string
@@ -55,7 +56,7 @@ export interface AutoFixStartRequest {
   readonly auditRunId: string
   readonly auditSnapshotRef: string
   readonly findingRegistryRef: string
-  readonly mode: 'fix'
+  readonly mode: AutoFixMode
   readonly expectedHead: string
   readonly expectedBranch: string
   readonly expectedCurrentWorkspaceFingerprint: string
@@ -82,7 +83,7 @@ export interface AutoFixObservation {
   readonly auditRunId: string
   readonly auditSnapshotRef: string
   readonly findingRegistryRef: string
-  readonly mode: 'fix'
+  readonly mode: AutoFixMode
   readonly executionStatus: AutoFixExecutionStatus
   readonly completionStatus?: AutoFixCompletionStatus
   readonly revision: number
@@ -111,7 +112,17 @@ export interface AutoFixObservation {
   readonly finalVerificationDiffHash?: string
   readonly residualRiskRef?: string
   readonly blockerRef?: string
-  readonly commits: readonly never[]
+  readonly postCommitHead?: string
+  readonly postCommitWorkspaceFingerprint?: string
+  readonly commits: readonly AutoFixCommitObservation[]
+}
+
+export interface AutoFixCommitObservation {
+  readonly sha: string
+  readonly parentSha: string
+  readonly changedFiles: readonly string[]
+  readonly reviewDiffHash: string
+  readonly commitEvidenceRef: string
 }
 
 export class AutoFixContractError extends Error {
@@ -134,11 +145,12 @@ export function validateAutoFixObservation(
     readonly baseSha: string
     readonly branch: string
     readonly workspaceFingerprint: string
+    readonly mode: AutoFixMode
   },
 ): AutoFixObservation {
   const record = requireRecord(value, 'Auto Fix observation')
   if (record.contractVersion !== AUTO_FIX_CONTRACT_VERSION) fail('unsupported contractVersion')
-  if (record.mode !== 'fix') fail('Adapter must execute in fix mode')
+  if (record.mode !== expected.mode) fail('Adapter mode does not match Run authorization')
   assertExactString(record, 'runId', expected.runId)
   assertExactString(record, 'findingId', expected.findingId)
   assertExactString(record, 'handoffRef', expected.handoffRef)
@@ -165,11 +177,21 @@ export function validateAutoFixObservation(
   if (record.workspaceVerified !== true || record.quiescent !== true) {
     fail('Adapter checkpoint must be workspaceVerified and quiescent')
   }
-  const commits = array(record.commits, 'commits')
-  if (commits.length !== 0) fail('fix mode must not create commits')
+  const commits = commitObservations(record.commits)
+  const completedCommit = expected.mode === 'commit' && executionStatus === 'COMPLETED'
+  if (expected.mode === 'fix' && commits.length !== 0) fail('fix mode must not create commits')
+  if (expected.mode === 'commit' && executionStatus !== 'COMPLETED' && commits.length !== 0) {
+    fail('non-completed commit mode must not report commits')
+  }
+  if (completedCommit && commits.length !== 1) fail('completed commit mode requires exactly one commit')
 
   const outputPaths = changeOutputs.map(output => output.path)
-  if (!sameStrings(changedFiles, outputPaths)) {
+  if (completedCommit) {
+    if (changeOutputs.length !== 0) fail('completed commit mode must not retain dirty changeOutputs')
+    if (!sameStrings(changedFiles, commits[0]!.changedFiles)) {
+      fail('commit changedFiles must cover Auto Fix changedFiles exactly')
+    }
+  } else if (!sameStrings(changedFiles, outputPaths)) {
     fail('changeOutputs must cover changedFiles exactly')
   }
 
@@ -190,6 +212,8 @@ export function validateAutoFixObservation(
   const finalVerificationDiffHash = optionalString(record, 'finalVerificationDiffHash')
   const residualRiskRef = optionalString(record, 'residualRiskRef')
   const blockerRef = optionalString(record, 'blockerRef')
+  const postCommitHead = optionalString(record, 'postCommitHead')
+  const postCommitWorkspaceFingerprint = optionalString(record, 'postCommitWorkspaceFingerprint')
 
   if (executionStatus === 'RUNNING') {
     if (completionStatus !== undefined) fail('RUNNING observation must not claim completion')
@@ -228,6 +252,16 @@ export function validateAutoFixObservation(
     if (!Number.isFinite(Date.parse(finalVerificationObservedAt!))) {
       fail('finalVerificationObservedAt must be an ISO-compatible timestamp')
     }
+    if (completedCommit) {
+      if (postCommitHead !== commits[0]!.sha) fail('postCommitHead must equal the reported commit')
+      if (postCommitWorkspaceFingerprint === undefined || !/^[a-f0-9]{64}$/u.test(postCommitWorkspaceFingerprint)) {
+        fail('completed commit mode requires postCommitWorkspaceFingerprint')
+      }
+      if (commits[0]!.parentSha !== expected.baseSha) fail('commit parent must equal the requested HEAD')
+      if (commits[0]!.reviewDiffHash !== reviewDiffHash) fail('commit must bind to the reviewed diff')
+    } else if (postCommitHead !== undefined || postCommitWorkspaceFingerprint !== undefined) {
+      fail('non-commit completion must not claim a post-commit workspace')
+    }
     if (completionStatus === 'DONE_WITH_CONCERNS' && residualRiskRef === undefined) {
       fail('DONE_WITH_CONCERNS requires residualRiskRef')
     }
@@ -254,7 +288,7 @@ export function validateAutoFixObservation(
     auditRunId: expected.auditRunId,
     auditSnapshotRef: expected.auditSnapshotRef,
     findingRegistryRef: expected.findingRegistryRef,
-    mode: 'fix',
+    mode: expected.mode,
     executionStatus,
     ...(completionStatus === undefined ? {} : { completionStatus }),
     revision,
@@ -283,7 +317,9 @@ export function validateAutoFixObservation(
     ...(finalVerificationDiffHash === undefined ? {} : { finalVerificationDiffHash }),
     ...(residualRiskRef === undefined ? {} : { residualRiskRef }),
     ...(blockerRef === undefined ? {} : { blockerRef }),
-    commits: Object.freeze([]),
+    ...(postCommitHead === undefined ? {} : { postCommitHead }),
+    ...(postCommitWorkspaceFingerprint === undefined ? {} : { postCommitWorkspaceFingerprint }),
+    commits,
   })
 }
 
@@ -366,6 +402,26 @@ function outputs(value: unknown): readonly { path: string; fingerprint: string }
   const paths = records.map(output => output.path)
   if (new Set(paths).size !== paths.length) fail('changeOutputs must not contain duplicate paths')
   return Object.freeze(records.sort((left, right) => left.path.localeCompare(right.path)))
+}
+
+function commitObservations(value: unknown): readonly AutoFixCommitObservation[] {
+  const commits = array(value, 'commits').map((item, index) => {
+    const record = requireRecord(item, `commits[${index}]`)
+    const sha = string(record, 'sha')
+    const parentSha = string(record, 'parentSha')
+    if (!/^[a-f0-9]{40,64}$/u.test(sha) || !/^[a-f0-9]{40,64}$/u.test(parentSha)) {
+      fail(`commits[${index}] sha and parentSha must be Git object ids`)
+    }
+    const changedFiles = uniquePaths(record.changedFiles, `commits[${index}].changedFiles`)
+    if (changedFiles.length === 0) fail(`commits[${index}] must contain changedFiles`)
+    const reviewDiffHash = sha256(record, 'reviewDiffHash')
+    const commitEvidenceRef = string(record, 'commitEvidenceRef')
+    return Object.freeze({ sha, parentSha, changedFiles, reviewDiffHash, commitEvidenceRef })
+  })
+  if (new Set(commits.map(commit => commit.sha)).size !== commits.length) {
+    fail('commits must not contain duplicate object ids')
+  }
+  return Object.freeze(commits)
 }
 
 function isRepositoryRelativePath(path: string): boolean {

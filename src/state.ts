@@ -9,7 +9,7 @@ import {
   realpath,
   rmdir,
 } from 'node:fs/promises'
-import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { isAbsolute, join, posix, relative, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
 
 import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
@@ -166,7 +166,11 @@ export interface AutoFixWorkspaceCheckpoint {
 
 export interface CommitRef {
   sha: string
-  autoFixRunId?: string
+  parentSha: string
+  autoFixRunId: string
+  changedFiles: string[]
+  reviewDiffHash: string
+  evidenceRef: string
 }
 
 export interface VerificationRef {
@@ -303,6 +307,18 @@ export interface AdoptWorktreeBoundaryOptions {
   before: WorktreeBoundary
   boundary: WorktreeBoundary
   acceptedPaths: readonly string[]
+  now?: Date
+  runtimeDependencies?: Readonly<Record<string, string>>
+}
+
+export interface AdoptCommitBoundaryOptions {
+  cwd: string
+  runId: string
+  expectedRevision: number
+  before: WorktreeBoundary
+  boundary: WorktreeBoundary
+  commit: CommitRef
+  mutate(draft: RunState): void
   now?: Date
   runtimeDependencies?: Readonly<Record<string, string>>
 }
@@ -790,6 +806,46 @@ function parseRunState(value: unknown): RunState {
         : { residualRiskRef: optionalString(entry, 'residualRiskRef') }),
     }
   })
+  const commits = requireArray(value, 'commits').map((entry, index): CommitRef => {
+    if (!isRecord(entry)) throw new Error(`commits[${index}] must be an object`)
+    const sha = requireString(entry, 'sha')
+    const parentSha = requireString(entry, 'parentSha')
+    if (!/^[a-f0-9]{40,64}$/u.test(sha) || !/^[a-f0-9]{40,64}$/u.test(parentSha)) {
+      throw new Error(`commits[${index}] contains invalid Git object ids`)
+    }
+    const changedFiles = requireArray(entry, 'changedFiles').map((item, pathIndex) => {
+      if (
+        typeof item !== 'string'
+        || item.length === 0
+        || isAbsolute(item)
+        || item !== posix.normalize(item)
+        || item.startsWith('../')
+        || item.includes('\\')
+      ) {
+        throw new Error(`commits[${index}].changedFiles[${pathIndex}] must be repository-relative`)
+      }
+      return item
+    })
+    if (changedFiles.length === 0 || new Set(changedFiles).size !== changedFiles.length) {
+      throw new Error(`commits[${index}].changedFiles must be non-empty and unique`)
+    }
+    const reviewDiffHash = requireString(entry, 'reviewDiffHash')
+    if (!/^[a-f0-9]{64}$/u.test(reviewDiffHash)) {
+      throw new Error(`commits[${index}].reviewDiffHash must be sha256`)
+    }
+    return {
+      sha,
+      parentSha,
+      autoFixRunId: requireString(entry, 'autoFixRunId'),
+      changedFiles,
+      reviewDiffHash,
+      evidenceRef: requireString(entry, 'evidenceRef'),
+    }
+  })
+  if (
+    new Set(commits.map(commit => commit.sha)).size !== commits.length
+    || new Set(commits.map(commit => commit.autoFixRunId)).size !== commits.length
+  ) throw new Error('commits must have unique sha and autoFixRunId values')
   return {
     schemaVersion: RUN_STATE_SCHEMA_VERSION,
     revision: requireInteger(value, 'revision'),
@@ -828,7 +884,7 @@ function parseRunState(value: unknown): RunState {
     ...(autoFixLease === undefined ? {} : { autoFixLease }),
     ...(autoFixCheckpoint === undefined ? {} : { autoFixCheckpoint }),
     fixRuns,
-    commits: parseRefArray(value, 'commits', ['sha'], ['autoFixRunId']) as unknown as CommitRef[],
+    commits,
     ...parseOptionalRef(value, 'fullVerification', ['status'], ['runRef', 'snapshotRef']) === undefined
       ? {}
       : { fullVerification: parseOptionalRef(value, 'fullVerification', ['status'], ['runRef', 'snapshotRef']) as unknown as VerificationRef },
@@ -1108,6 +1164,121 @@ export async function adoptWorktreeBoundary(options: AdoptWorktreeBoundaryOption
     await writeStateFile(statePath, next)
     return next
   })
+}
+
+export async function adoptCommitBoundary(options: AdoptCommitBoundaryOptions): Promise<RunState> {
+  const statePath = await resolveStatePath(options.cwd, options.runId)
+  return await withFileLock(statePath, async () => {
+    const previous = await readStateFile(statePath)
+    if (previous.revision !== options.expectedRevision) {
+      throw new RunStateError(
+        'REVISION_CONFLICT',
+        `expected revision ${options.expectedRevision}, found ${previous.revision}`,
+      )
+    }
+    if (previous.authorization.autoFix !== 'commit-each') {
+      throw new RunStateError('INVALID_TRANSITION', 'commit boundary requires commit-each authorization')
+    }
+    if (
+      options.before.worktreeRoot !== previous.repo.worktreeRoot
+      || options.before.fingerprint !== previous.repo.worktreeFingerprint
+    ) {
+      throw new RunStateError('WORKTREE_MISMATCH', 'commit lease did not open from the current Run baseline')
+    }
+    if (options.commit.parentSha !== previous.repo.head) {
+      throw new RunStateError('HEAD_MISMATCH', 'commit parent does not match the Run HEAD')
+    }
+    const resolvedCommit = await gitText(options.cwd, ['rev-parse', '--verify', `${options.commit.sha}^{commit}`])
+    if (resolvedCommit !== options.commit.sha) {
+      throw new RunStateError('HEAD_MISMATCH', 'reported commit does not resolve exactly')
+    }
+    const ancestry = (await gitText(options.cwd, ['rev-list', '--parents', '-n', '1', options.commit.sha])).split(' ')
+    if (
+      ancestry.length !== 2
+      || ancestry[0] !== options.commit.sha
+      || ancestry[1] !== options.commit.parentSha
+    ) {
+      throw new RunStateError('HEAD_MISMATCH', 'reported commit must have the exact authorized parent')
+    }
+    const committedPaths = nulPathSet(await gitBuffer(options.cwd, [
+      'diff-tree', '--no-commit-id', '--name-only', '-r', '-z', options.commit.sha, '--',
+    ]))
+    if (JSON.stringify(committedPaths) !== JSON.stringify([...options.commit.changedFiles].sort())) {
+      throw new RunStateError('WORKTREE_MISMATCH', 'reported commit paths do not match the Git commit')
+    }
+
+    const current = await captureEnvironment(options.cwd, {
+      lockfilePath: previous.dependencies.lockfilePath,
+      runtimeDependencies: options.runtimeDependencies,
+    })
+    if (
+      current.repo.worktreeRoot !== previous.repo.worktreeRoot
+      || current.repo.privateGitDir !== previous.repo.privateGitDir
+      || current.repo.branch !== previous.repo.branch
+    ) {
+      throw new RunStateError('WORKTREE_MISMATCH', 'canonical worktree, private Git dir, or branch changed')
+    }
+    if (current.repo.head !== options.commit.sha) {
+      throw new RunStateError('HEAD_MISMATCH', 'worktree HEAD is not the reported commit')
+    }
+    if (current.contextFingerprint !== previous.contextFingerprint) {
+      throw new RunStateError('CONTEXT_MISMATCH', 'commit changed canonical Context')
+    }
+    if (
+      current.dependencies.lockfilePath !== previous.dependencies.lockfilePath
+      || current.dependencies.lockfileSha256 !== previous.dependencies.lockfileSha256
+      || !sameRecord(current.dependencies.packages, previous.dependencies.packages)
+    ) {
+      throw new RunStateError('DEPENDENCY_MISMATCH', 'commit changed locked runtime dependencies')
+    }
+    if (
+      options.boundary.worktreeRoot !== current.repo.worktreeRoot
+      || options.boundary.fingerprint !== current.repo.worktreeFingerprint
+    ) {
+      throw new RunStateError('WORKTREE_MISMATCH', 'reported post-commit boundary is not current')
+    }
+
+    const next = structuredClone(previous)
+    next.repo.head = current.repo.head
+    next.repo.worktreeFingerprint = current.repo.worktreeFingerprint
+    options.mutate(next)
+    assertCommitImmutable(previous, next)
+    if (
+      next.repo.head !== current.repo.head
+      || next.repo.worktreeFingerprint !== current.repo.worktreeFingerprint
+    ) {
+      throw new RunStateError('INVALID_TRANSITION', 'commit callback changed the verified Git boundary')
+    }
+    assertTransition(previous, next)
+    next.revision = previous.revision + 1
+    next.updatedAt = (options.now ?? new Date()).toISOString()
+    parseRunState(next)
+    await writeStateFile(statePath, next)
+    return next
+  })
+}
+
+function assertCommitImmutable(previous: RunState, next: RunState): void {
+  const immutable = [
+    'schemaVersion',
+    'runId',
+    'contextFingerprint',
+    'dependencies',
+    'authorization',
+    'createdAt',
+  ] as const
+  for (const key of immutable) {
+    if (JSON.stringify(previous[key]) !== JSON.stringify(next[key])) {
+      throw new RunStateError('INVALID_TRANSITION', `${key} is immutable across a commit boundary`)
+    }
+  }
+  if (
+    previous.repo.worktreeRoot !== next.repo.worktreeRoot
+    || previous.repo.privateGitDir !== next.repo.privateGitDir
+    || previous.repo.branch !== next.repo.branch
+  ) {
+    throw new RunStateError('INVALID_TRANSITION', 'commit boundary may update only HEAD and worktree fingerprint')
+  }
 }
 
 function assertAdoptableEnvironment(

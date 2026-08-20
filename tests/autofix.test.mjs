@@ -18,6 +18,7 @@ const expected = Object.freeze({
   baseSha: 'abc123',
   branch: 'main',
   workspaceFingerprint: 'd'.repeat(64),
+  mode: 'fix',
 })
 
 function observation(overrides = {}) {
@@ -73,7 +74,13 @@ test('accepts authoritative fix-only DONE and DONE_WITH_CONCERNS observations', 
 
 test('rejects commits and incomplete completion evidence in fix mode', () => {
   assert.throws(
-    () => validateAutoFixObservation(observation({ commits: [{ sha: 'abc' }] }), expected),
+    () => validateAutoFixObservation(observation({ commits: [{
+      sha: '1'.repeat(40),
+      parentSha: '2'.repeat(40),
+      changedFiles: ['src/fix.ts'],
+      reviewDiffHash: 'b'.repeat(64),
+      commitEvidenceRef: 'git-workflow:commit:invalid',
+    }] }), expected),
     error => error instanceof AutoFixContractError && /must not create commits/u.test(error.message),
   )
   assert.throws(
@@ -91,7 +98,7 @@ test('rejects commits and incomplete completion evidence in fix mode', () => {
 test('enforces status mapping, identity, and exact changed-file ownership', () => {
   assert.throws(
     () => validateAutoFixObservation(observation({ mode: 'commit' }), expected),
-    /fix mode/u,
+    /mode does not match Run authorization/u,
   )
   assert.throws(
     () => validateAutoFixObservation(observation({ findingId: 'AUD-999' }), expected),
@@ -135,5 +142,43 @@ test('accepts only quiescent resumable checkpoints for non-terminal execution', 
   assert.throws(
     () => validateAutoFixObservation(observation({ quiescent: false }), expected),
     /workspaceVerified and quiescent/u,
+  )
+})
+
+test('accepts one authorization-bound commit and rejects duplicate or stale commit evidence', () => {
+  const commitExpected = { ...expected, mode: 'commit' }
+  const sha = '1'.repeat(40)
+  const parentSha = expected.baseSha.padEnd(40, '0')
+  commitExpected.baseSha = parentSha
+  const value = observation({
+    mode: 'commit',
+    baseSha: parentSha,
+    changeOutputs: [],
+    postCommitHead: sha,
+    postCommitWorkspaceFingerprint: 'e'.repeat(64),
+    commits: [{
+      sha,
+      parentSha,
+      changedFiles: ['src/fix.ts'],
+      reviewDiffHash: 'b'.repeat(64),
+      commitEvidenceRef: 'git-workflow:commit:1',
+    }],
+  })
+  const validated = validateAutoFixObservation(value, commitExpected)
+  assert.equal(validated.commits[0].sha, sha)
+  assert.throws(
+    () => validateAutoFixObservation({ ...value, mode: 'fix' }, commitExpected),
+    /mode does not match/u,
+  )
+  assert.throws(
+    () => validateAutoFixObservation({ ...value, commits: [...value.commits, ...value.commits] }, commitExpected),
+    /duplicate object ids|exactly one commit/u,
+  )
+  assert.throws(
+    () => validateAutoFixObservation({
+      ...value,
+      commits: [{ ...value.commits[0], reviewDiffHash: 'f'.repeat(64) }],
+    }, commitExpected),
+    /bind to the reviewed diff/u,
   )
 })

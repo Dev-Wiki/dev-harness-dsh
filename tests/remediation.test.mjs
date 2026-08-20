@@ -11,7 +11,7 @@ import * as Plugin from '../lib/index.js'
 const execFile = promisify(execFileCallback)
 
 async function git(cwd, ...args) {
-  await execFile('git', ['-C', cwd, ...args])
+  return (await execFile('git', ['-C', cwd, ...args])).stdout.trim()
 }
 
 async function repository() {
@@ -32,8 +32,8 @@ async function repository() {
   return cwd
 }
 
-async function routedRun(cwd, runId = 'remediation-fixture') {
-  let state = await Plugin.createRun({ cwd, runId })
+async function routedRun(cwd, runId = 'remediation-fixture', authorization = 'fix-only') {
+  let state = await Plugin.createRun({ cwd, runId, authorization })
   state = await Plugin.updateRun({
     cwd,
     runId,
@@ -82,7 +82,7 @@ async function observation(request, options = {}) {
   const completionStatus = options.completionStatus ?? 'DONE'
   const executionStatus = options.executionStatus ?? 'COMPLETED'
   const outputs = []
-  for (const path of options.outputPaths ?? []) {
+  for (const path of options.committed ? [] : (options.outputPaths ?? [])) {
     const boundary = await Plugin.captureWorktreeBoundary(request.cwd)
     outputs.push({ path, fingerprint: boundary.changedPaths[path] })
   }
@@ -95,7 +95,7 @@ async function observation(request, options = {}) {
     auditRunId: request.auditRunId,
     auditSnapshotRef: request.auditSnapshotRef,
     findingRegistryRef: request.findingRegistryRef,
-    mode: 'fix',
+    mode: request.mode,
     executionStatus,
     ...(options.includeCompletion === false ? {} : { completionStatus }),
     revision: options.revision ?? 1,
@@ -126,7 +126,11 @@ async function observation(request, options = {}) {
       ? { residualRiskRef: `autofix:risk:${request.findingId}` }
       : {}),
     ...(options.blockerRef === undefined ? {} : { blockerRef: options.blockerRef }),
-    commits: [],
+    ...(options.postCommitHead === undefined ? {} : {
+      postCommitHead: options.postCommitHead,
+      postCommitWorkspaceFingerprint: options.postCommitWorkspaceFingerprint,
+    }),
+    commits: options.commits ?? [],
   }
 }
 
@@ -350,6 +354,168 @@ test('fails closed when a later fix-only run overlaps an earlier run-owned file'
     const persisted = await Plugin.loadRun(cwd, state.runId)
     assert.equal(persisted.autoFixLease.findingId, 'AUD-002')
     assert.equal(persisted.fixRuns.length, 1)
+  } finally {
+    await rm(cwd, { recursive: true, force: true })
+  }
+})
+
+test('commit-each delegates one exact commit per Finding and advances the accepted HEAD', async () => {
+  const cwd = await repository()
+  const state = await routedRun(cwd, 'remediation-commit-each', 'commit-each')
+  const starts = []
+  const adapter = {
+    name: 'committing-auto-fix',
+    async start(request) {
+      starts.push({ findingId: request.findingId, mode: request.mode, parent: request.expectedHead })
+      const path = request.findingId === 'AUD-001' ? 'committed-one.txt' : 'committed-two.txt'
+      await writeFile(join(request.cwd, path), `${request.findingId}\n`)
+      await git(request.cwd, 'add', '--', path)
+      await git(request.cwd, 'commit', '-m', `Fix ${request.findingId}`)
+      const commitSha = await git(request.cwd, 'rev-parse', 'HEAD')
+      const boundary = await Plugin.captureWorktreeBoundary(request.cwd)
+      return await observation(request, {
+        committed: true,
+        outputPaths: [path],
+        postCommitHead: commitSha,
+        postCommitWorkspaceFingerprint: boundary.fingerprint,
+        commits: [{
+          sha: commitSha,
+          parentSha: request.expectedHead,
+          changedFiles: [path],
+          reviewDiffHash: sha('b'),
+          commitEvidenceRef: `git-workflow:commit:${request.findingId}`,
+        }],
+      })
+    },
+    async resume() { throw new Error('not reached') },
+  }
+  try {
+    const first = await Plugin.advanceRemediationRun({
+      cwd, runId: state.runId, adapter, signal: new AbortController().signal,
+    })
+    assert.equal(first.commits.length, 1)
+    assert.equal(first.repo.head, first.commits[0].sha)
+    assert.equal(first.commits[0].parentSha, starts[0].parent)
+    assert.deepEqual(first.commits[0].changedFiles, ['committed-one.txt'])
+    assert.equal(first.currentFinding, 'AUD-002')
+    await Plugin.validateResume(first, cwd)
+
+    const second = await Plugin.advanceRemediationRun({
+      cwd, runId: state.runId, adapter, signal: new AbortController().signal,
+    })
+    assert.equal(second.commits.length, 2)
+    assert.equal(second.commits[1].parentSha, second.commits[0].sha)
+    assert.equal(second.repo.head, second.commits[1].sha)
+    assert.deepEqual(starts.map(item => item.mode), ['commit', 'commit'])
+    assert.equal(new Set(second.commits.map(commit => commit.autoFixRunId)).size, 2)
+    assert.equal(second.currentFinding, undefined)
+    await Plugin.validateResume(second, cwd)
+  } finally {
+    await rm(cwd, { recursive: true, force: true })
+  }
+})
+
+test('rejects a downstream commit containing undeclared files and retains its lease', async () => {
+  const cwd = await repository()
+  const state = await routedRun(cwd, 'remediation-commit-scope', 'commit-each')
+  const adapter = {
+    name: 'overbroad-commit-auto-fix',
+    async start(request) {
+      await writeFile(join(request.cwd, 'declared.txt'), 'declared\n')
+      await writeFile(join(request.cwd, 'extra.txt'), 'extra\n')
+      await git(request.cwd, 'add', '--', 'declared.txt', 'extra.txt')
+      await git(request.cwd, 'commit', '-m', 'Overbroad downstream commit')
+      const commitSha = await git(request.cwd, 'rev-parse', 'HEAD')
+      const boundary = await Plugin.captureWorktreeBoundary(request.cwd)
+      return await observation(request, {
+        committed: true,
+        outputPaths: ['declared.txt'],
+        postCommitHead: commitSha,
+        postCommitWorkspaceFingerprint: boundary.fingerprint,
+        commits: [{
+          sha: commitSha,
+          parentSha: request.expectedHead,
+          changedFiles: ['declared.txt'],
+          reviewDiffHash: sha('b'),
+          commitEvidenceRef: 'git-workflow:commit:overbroad',
+        }],
+      })
+    },
+    async resume() { throw new Error('not reached') },
+  }
+  try {
+    await assert.rejects(Plugin.advanceRemediationRun({
+      cwd, runId: state.runId, adapter, signal: new AbortController().signal,
+    }), error => error.code === 'WORKTREE_MISMATCH' && /commit paths/u.test(error.message))
+    const persisted = await Plugin.loadRun(cwd, state.runId)
+    assert.equal(persisted.autoFixLease.status, 'OPEN')
+    assert.equal(persisted.commits.length, 0)
+    assert.equal(persisted.repo.head, state.repo.head)
+  } finally {
+    await rm(cwd, { recursive: true, force: true })
+  }
+})
+
+test('resumes commit-each without changing mode and atomically records the downstream commit', async () => {
+  const cwd = await repository()
+  const state = await routedRun(cwd, 'remediation-commit-resume', 'commit-each')
+  let starts = 0
+  let resumes = 0
+  const adapter = {
+    name: 'resumable-commit-auto-fix',
+    async start(request) {
+      starts++
+      assert.equal(request.mode, 'commit')
+      await writeFile(join(request.cwd, 'resumed-commit.txt'), 'partial commit work\n')
+      return await observation(request, {
+        executionStatus: 'RUNNING',
+        includeCompletion: false,
+        outputPaths: ['resumed-commit.txt'],
+      })
+    },
+    async resume(request) {
+      resumes++
+      assert.equal(request.mode, 'commit')
+      assert.equal(request.expectedRevision, 1)
+      await git(request.cwd, 'add', '--', 'resumed-commit.txt')
+      await git(request.cwd, 'commit', '-m', 'Resume authorized downstream commit')
+      const commitSha = await git(request.cwd, 'rev-parse', 'HEAD')
+      const boundary = await Plugin.captureWorktreeBoundary(request.cwd)
+      return await observation(request, {
+        revision: 2,
+        stateDigest: sha('c'),
+        committed: true,
+        outputPaths: ['resumed-commit.txt'],
+        postCommitHead: commitSha,
+        postCommitWorkspaceFingerprint: boundary.fingerprint,
+        commits: [{
+          sha: commitSha,
+          parentSha: request.expectedHead,
+          changedFiles: ['resumed-commit.txt'],
+          reviewDiffHash: sha('b'),
+          commitEvidenceRef: 'git-workflow:commit:resumed',
+        }],
+      })
+    },
+  }
+  try {
+    const paused = await Plugin.advanceRemediationRun({
+      cwd, runId: state.runId, adapter, signal: new AbortController().signal,
+    })
+    assert.equal(paused.status, 'PAUSED')
+    assert.equal(paused.authorization.autoFix, 'commit-each')
+    assert.equal(paused.commits.length, 0)
+
+    const completed = await Plugin.advanceRemediationRun({
+      cwd, runId: state.runId, adapter, signal: new AbortController().signal,
+    })
+    assert.equal(completed.authorization.autoFix, 'commit-each')
+    assert.equal(completed.fixRuns[0].status, 'DONE')
+    assert.equal(completed.commits.length, 1)
+    assert.equal(completed.repo.head, completed.commits[0].sha)
+    assert.equal(starts, 1)
+    assert.equal(resumes, 1)
+    await Plugin.validateResume(completed, cwd)
   } finally {
     await rm(cwd, { recursive: true, force: true })
   }
