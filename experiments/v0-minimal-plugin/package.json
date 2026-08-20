@@ -22,7 +22,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "oxlint src *.mjs",
-    "test": "npm run build && node smoke.mjs && node agent-smoke.mjs && node workflow-smoke.mjs && node crash-smoke.mjs",
+    "test": "npm run build && node smoke.mjs && node agent-smoke.mjs && node workflow-smoke.mjs && node tool-pipeline-smoke.mjs && node crash-smoke.mjs",
     "pack:check": "npm pack --dry-run",
     "verify": "npm run typecheck && npm run lint && npm test && npm run pack:check"
   },
